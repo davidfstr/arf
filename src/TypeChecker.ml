@@ -150,7 +150,8 @@ let rec
     } in
     exec_func initial_context main_func
 
-let input = {
+(* Program: Returns main's argument, namely NoneType. *)
+let input1 = {
   funcs = [
     {
       name = "main";
@@ -158,11 +159,110 @@ let input = {
       body = [
         Return {
           result_var = "x"
-        }
+        };
       ]
     }
   ]
 }
 
-let output = exec_program input
+(* Program: Returns the literal Int. *)
+let input2 = {
+  funcs = [
+    {
+      name = "main";
+      param_var = "x";
+      body = [
+        AssignLiteral {
+          target_var = "k";
+          literal = Int
+        };
+        Return {
+          result_var = "k"
+        };
+      ]
+    }
+  ]
+}
+
+(* Program: Calls f with main's argument. f returns its argument. *)
+let input3 = {
+  funcs = [
+    {
+      name = "main";
+      param_var = "x";
+      body = [
+        AssignCall {
+          target_var = "result";
+          func_name = "f";
+          arg_var = "x"
+        };
+        Return {
+          result_var = "result"
+        };
+      ]
+    };
+    {
+      name = "f";
+      param_var = "x";
+      body = [
+        Return {
+          result_var = "x"
+        };
+      ]
+    };
+  ]
+}
+
+(* Program: Computes factorial recursively. *)
+let input4 = {
+  funcs = [
+    {
+      name = "main";
+      param_var = "x";
+      body = [
+        AssignLiteral {
+          target_var = "k";
+          literal = Int
+        };
+        AssignCall {
+          target_var = "result";
+          func_name = "fact";
+          arg_var = "k"
+        };
+        Return {
+          result_var = "result"
+        };
+      ]
+    };
+    {
+      name = "fact";
+      param_var = "n";
+      body = [
+        If {
+          then_block = [
+            AssignLiteral {
+              target_var = "k";
+              literal = Int
+            };
+            Return {
+              result_var = "k"
+            };
+          ];
+          else_block = [
+            AssignCall {
+              target_var = "result";
+              func_name = "fact";
+              arg_var = "n"
+            };
+            Return {
+              result_var = "result"
+            };
+          ]
+        };
+      ]
+    };
+  ]
+}
+
+let output = exec_program input4
 let () = printf "%s\n" (Sexp.to_string (sexp_of_exec_context output))
