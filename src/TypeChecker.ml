@@ -67,7 +67,6 @@ let rec
           after_assign_context
           
         | AssignCall { target_var = target_var; func_name = func_name; arg_var = arg_var } ->
-          (* TODO: What if invoked func doesn't exist? *)
           let func = find_func context.program.funcs func_name in
           if not (BatList.mem func context.call_stack) then
             (* Non-recursive call *)
@@ -82,18 +81,18 @@ let rec
               executing = true
             } in
             let exit_func_context = exec_func enter_func_context func in
+            (* TODO: Handle functions that can return multiple kinds of values *)
             let returned_value = unique_item exit_func_context.returned_types in
             let resumed_context = {
               context with
-              (* TODO: Handle functions that can return multiple kinds of values *)
               names = BatMap.add target_var returned_value context.names
             } in
             resumed_context
           else
             (* Recursive call *)
+            let () = printf "* call#rec: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
             (* TODO: If named func has approx return type then use it,
              *       rather than *always* suspending here *)
-            let () = printf "* call#rec: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
             let suspended_context = {
               context with 
               suspended_via_call_to = BatSet.add func context.suspended_via_call_to;
@@ -137,11 +136,12 @@ let rec
         | Return { result_var = result_var } ->
           let () = printf "* return: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
           let result_value = BatMap.find result_var context.names in
-          {
+          let returning_context = {
             context with
             returned_types = BatSet.add result_value context.returned_types;
             executing = false
-          }
+          } in
+          returning_context
     and
   
   exec_list (* exec_context -> stmt list -> exec_context *) context stmt_list =
@@ -152,10 +152,12 @@ let rec
     let final_context = exec_list context func.body in
     if final_context.executing then
       (* Implicit return of NoneType at the end of a function's body *)
-      {
+      let returning_context = {
         final_context with
-        returned_types = BatSet.add NoneType final_context.returned_types
-      }
+        returned_types = BatSet.add NoneType final_context.returned_types;
+        executing = false
+      } in
+      returning_context
     else
       final_context
     and
