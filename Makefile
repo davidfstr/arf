@@ -1,15 +1,13 @@
 .PHONY: build run clean
 
-build: Ast.native
-
-run: Ast.native
-	./Ast.native
+run: TypeChecker.native
+	./TypeChecker.native
 
 clean:
-	rm -f Ast.native
+	rm -f *.native
 
-Ast.native: src/*.ml
+TypeChecker.native: src/*.ml
 	@# -w -30: Disables warnings about different record types sharing a key name
 	ocamlbuild -use-ocamlfind \
 		-cflags -w,-30 \
-		src/Ast.native
+		src/TypeChecker.native

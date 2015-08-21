@@ -8,7 +8,7 @@ type
   
   func = {
     name : string;
-    param : string;
+    param_var : string;
     body : stmt list
   } and
   
@@ -39,19 +39,5 @@ type
     | NoneType
     | Bool
     | Int
-
-let input = {
-  funcs = [
-    {
-      name = "main";
-      param = "x";
-      body = [
-        Return {
-          result_var = "x"
-        }
-      ]
-    }
-  ]
-}
-
-let () = printf "Hello\n"
+  
+  with sexp
