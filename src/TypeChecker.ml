@@ -41,6 +41,15 @@ let rec find_func (* func list -> string -> func *) func_list func_name =
     | [] ->
       raise (NoSuchFunction func_name)
 
+exception SetHasNoUniqueElement
+
+let unique_item set =
+  match BatSet.to_list set with
+    | [x] ->
+      x
+    | _ ->
+      raise SetHasNoUniqueElement
+
 exception ProgramHasNoMainFunction
 
 let rec
@@ -50,35 +59,53 @@ let rec
     else
       match stmt with
         | AssignLiteral { target_var = target_var; literal = literal } ->
-          { context with names = BatMap.add target_var literal context.names }
+          let () = printf "* assign: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
+          let after_assign_context = {
+            context with
+            names = BatMap.add target_var literal context.names
+          } in
+          after_assign_context
           
         | AssignCall { target_var = target_var; func_name = func_name; arg_var = arg_var } ->
           (* TODO: What if invoked func doesn't exist? *)
           let func = find_func context.program.funcs func_name in
           if not (BatList.mem func context.call_stack) then
             (* Non-recursive call *)
+            let () = printf "* call#nonrec: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
             let arg_value = BatMap.find arg_var context.names in
             let enter_func_context = {
               context with
               call_stack = func :: context.call_stack;
-              names = BatMap.of_enum (BatList.enum [(arg_var, arg_value)]);
+              names = BatMap.of_enum (BatList.enum [(func.param_var, arg_value)]);
               returned_types = BatSet.empty;
               suspended_via_call_to = BatSet.empty;
               executing = true
             } in
-            exec_func enter_func_context func
+            let exit_func_context = exec_func enter_func_context func in
+            let returned_value = unique_item exit_func_context.returned_types in
+            let resumed_context = {
+              context with
+              (* TODO: Handle functions that can return multiple kinds of values *)
+              names = BatMap.add target_var returned_value context.names
+            } in
+            resumed_context
           else
             (* Recursive call *)
             (* TODO: If named func has approx return type then use it,
              *       rather than *always* suspending here *)
-            {
+            let () = printf "* call#rec: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
+            let suspended_context = {
               context with 
               suspended_via_call_to = BatSet.add func context.suspended_via_call_to;
               executing = false
-            }
+            } in
+            suspended_context
         
         | If { then_block = then_block; else_block = else_block } ->
+          let () = printf "* if: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
+          let () = printf "* then\n" in
           let then_result = exec_list context then_block in
+          let () = printf "* else\n" in
           let else_result = exec_list context else_block in
           
           let join (* typ -> typ -> typ *) typ1 typ2 = 
@@ -89,6 +116,7 @@ let rec
               | _ -> NoneType (* TODO: Support union types *)
             in
           
+          let () = printf "* end if\n" in
           let joined_result = {
             program = context.program;
             call_stack = context.call_stack;
@@ -107,6 +135,7 @@ let rec
           joined_result
         
         | Return { result_var = result_var } ->
+          let () = printf "* return: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
           let result_value = BatMap.find result_var context.names in
           {
             context with
@@ -203,10 +232,10 @@ let input3 = {
     };
     {
       name = "f";
-      param_var = "x";
+      param_var = "n";
       body = [
         Return {
-          result_var = "x"
+          result_var = "n"
         };
       ]
     };
