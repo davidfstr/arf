@@ -132,14 +132,22 @@ let rec
               } in
               
               let exit_func_context = exec_func enter_func_context func in
-              (* TODO: Handle functions that can return multiple kinds of values *)
-              let returned_value = unique_item exit_func_context.returned_types in
-              
-              let resumed_context = {
-                context with
-                names = BatMap.add target_var returned_value context.names
-              } in
-              resumed_context
+              if exit_func_context.executing then
+                (* TODO: Handle functions that can return multiple kinds of values *)
+                let returned_value = unique_item exit_func_context.returned_types in
+                
+                let resumed_context = {
+                  context with
+                  names = BatMap.add target_var returned_value context.names
+                } in
+                resumed_context
+              else
+                let suspended_context = {
+                  exit_func_context with
+                  (* NOTE: Redundant, but I want to be explicit *)
+                  executing = false
+                } in
+                suspended_context
             
             | Some prior_frame_with_func ->
               (* Recursive call *)
@@ -155,7 +163,7 @@ let rec
                   resumed_context
                 
                 | None ->
-                  (* No approx return type available yet? Suspect execution *)
+                  (* No approx return type available yet? Suspend execution *)
                   let () = printf "* call#rec#suspend: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
                   
                   let suspended_context = {
