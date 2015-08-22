@@ -343,8 +343,8 @@ let rec
 let input1 = {
   funcs = [
     {
-      name = "main"; param_var = "x"; body = [
-        Return { result_var = "x" };
+      name = "main"; param_var = "_"; body = [
+        Return { result_var = "_" };
       ]
     }
   ]
@@ -354,7 +354,7 @@ let input1 = {
 let input2 = {
   funcs = [
     {
-      name = "main"; param_var = "x"; body = [
+      name = "main"; param_var = "_"; body = [
         AssignLiteral { target_var = "k"; literal = Int };
         Return { result_var = "k" };
       ]
@@ -366,7 +366,8 @@ let input2 = {
 let input3 = {
   funcs = [
     {
-      name = "main"; param_var = "x"; body = [
+      name = "main"; param_var = "_"; body = [
+        AssignLiteral { target_var = "x"; literal = Int };
         AssignCall { target_var = "result"; func_name = "f"; arg_var = "x" };
         Return { result_var = "result" };
       ]
@@ -383,7 +384,7 @@ let input3 = {
 let input4 = {
   funcs = [
     {
-      name = "main"; param_var = "x"; body = [
+      name = "main"; param_var = "_"; body = [
         AssignLiteral { target_var = "k"; literal = Int };
         AssignCall { target_var = "result"; func_name = "fact"; arg_var = "k" };
         Return { result_var = "result" };
@@ -409,9 +410,9 @@ let input4 = {
 let input5 = {
   funcs = [
     {
-      name = "infinite_loop"; param_var = "x"; body = [
-        AssignCall { target_var = "x"; func_name = "infinite_loop"; arg_var = "x" };
-        Return { result_var = "x" };
+      name = "infinite_loop"; param_var = "_"; body = [
+        AssignCall { target_var = "_"; func_name = "infinite_loop"; arg_var = "_" };
+        Return { result_var = "_" };
       ]
     }
   ]
