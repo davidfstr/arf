@@ -2,17 +2,45 @@ open Ast
 open Core.Std
 
 type frame = {
+  (** The function executing in this frame. *)
   func : func;
+  (** Approximate return type of the function in this frame.
+    * May be extended with additional union members while the function
+    * is still executing and computing its fix point.
+    * 
+    * May be None if the function has not yet completed one full execution
+    * pass and has no return type information available. *)
   approx_return_type : typ option
 }
 
+(** Interpreter state while executing statements in a program. *)
 type exec_context = {
+  (** Program that is being executed. *)
   program : program;
-  (* Current function is listed first. Immediate caller is listed second. *)
+  (** List of functions that were invoked to reach the current function,
+    * including the current function itself. Current function is listed first.
+    * Immediate caller is listed second. Further callers listed next. *)
   call_stack : frame list;
+  (** Set of local variables, and the type of value each one currently holds.
+    * When entering a new function starts with the function parameters only. *)
   names : (string, typ) BatMap.t;
+  (** Within a function, the set of all types returned by various
+    * return statements in function. When entering a new function starts empty.
+    * 
+    * When returning from a function call, the set of types that could be
+    * returned from the callee. *)
   returned_types : typ BatSet.t;
-  suspended_via_call_to : func BatSet.t;
+  (** Set of functions that could not be called recursively because they
+    * had no return type information available yet. Is always a subset of the
+    * functions in the current call stack. When entering a new function starts empty. *)
+  suspended_via_call_to : func BatSet.t;  (* contains_suspensions_due_to *)
+  (** Within a function, whether the current block is still executing and isn't
+    * suspended due to abrupt termination (via a return) or inability to make
+    * progress on a function call. When entering a new function starts true.
+    * 
+    * When returning from a function call, whether the caller should continue
+    * execution. If false then the caller should be suspended because the
+    * callee did not have enough information to generate a return type. *)
   executing : bool
 }
 
