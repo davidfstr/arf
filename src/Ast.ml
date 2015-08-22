@@ -39,5 +39,8 @@ type
     | NoneType
     | Bool
     | Int
+    
+    (* Special type that indicates that an expression will never finish evaluating *)
+    | Unreachable
   
   with sexp

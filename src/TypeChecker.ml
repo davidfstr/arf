@@ -1,10 +1,15 @@
 open Ast
 open Core.Std
 
+type frame = {
+  func : func;
+  approx_return_type : typ option
+}
+
 type exec_context = {
   program : program;
   (* Current function is listed first. Immediate caller is listed second. *)
-  call_stack : func list;
+  call_stack : frame list;
   names : (string, typ) BatMap.t;
   returned_types : typ BatSet.t;
   suspended_via_call_to : func BatSet.t;
@@ -51,6 +56,7 @@ let unique_item set =
       raise SetHasNoUniqueElement
 
 exception ProgramHasNoMainFunction
+exception UnionTypesNotYetImplemented
 
 let rec
   (exec : exec_context -> stmt -> exec_context) context stmt =
@@ -68,37 +74,70 @@ let rec
           
         | AssignCall { target_var = target_var; func_name = func_name; arg_var = arg_var } ->
           let func = find_func context.program.funcs func_name in
-          if not (BatList.mem func context.call_stack) then
-            (* Non-recursive call *)
-            let () = printf "* call#nonrec: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
-            let arg_value = BatMap.find arg_var context.names in
-            let enter_func_context = {
-              context with
-              call_stack = func :: context.call_stack;
-              names = BatMap.of_enum (BatList.enum [(func.param_var, arg_value)]);
-              returned_types = BatSet.empty;
-              suspended_via_call_to = BatSet.empty;
-              executing = true
-            } in
-            let exit_func_context = exec_func enter_func_context func in
-            (* TODO: Handle functions that can return multiple kinds of values *)
-            let returned_value = unique_item exit_func_context.returned_types in
-            let resumed_context = {
-              context with
-              names = BatMap.add target_var returned_value context.names
-            } in
-            resumed_context
-          else
-            (* Recursive call *)
-            let () = printf "* call#rec: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
-            (* TODO: If named func has approx return type then use it,
-             *       rather than *always* suspending here *)
-            let suspended_context = {
-              context with 
-              suspended_via_call_to = BatSet.add func context.suspended_via_call_to;
-              executing = false
-            } in
-            suspended_context
+          
+          let rec (find_frame_with_func : frame list -> func -> frame option) frame_list func =
+            match frame_list with
+              | (head :: tail) ->
+                if head.func = func then
+                  Some head
+                else
+                  find_frame_with_func tail func
+              
+              | [] ->
+                None
+            in
+          
+          (match find_frame_with_func context.call_stack func with
+            | None ->
+              (* Non-recursive call *)
+              let () = printf "* call#nonrec: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
+              
+              let arg_value = BatMap.find arg_var context.names in
+              let new_frame = { func = func; approx_return_type = None } in
+              let enter_func_context = {
+                context with
+                call_stack = new_frame :: context.call_stack;
+                names = BatMap.of_enum (BatList.enum [(func.param_var, arg_value)]);
+                returned_types = BatSet.empty;
+                suspended_via_call_to = BatSet.empty;
+                executing = true
+              } in
+              
+              let exit_func_context = exec_func enter_func_context func in
+              (* TODO: Handle functions that can return multiple kinds of values *)
+              let returned_value = unique_item exit_func_context.returned_types in
+              
+              let resumed_context = {
+                context with
+                names = BatMap.add target_var returned_value context.names
+              } in
+              resumed_context
+            
+            | Some prior_frame_with_func ->
+              (* Recursive call *)
+              (match prior_frame_with_func.approx_return_type with
+                | Some approx_return_type ->
+                  (* Use the approx return type as the result and continue *)
+                  let () = printf "* call#rec#resume: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
+                  
+                  let resumed_context = {
+                    context with
+                    names = BatMap.add target_var approx_return_type context.names
+                  } in
+                  resumed_context
+                
+                | None ->
+                  (* No approx return type available yet? Suspect execution *)
+                  let () = printf "* call#rec#suspend: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
+                  
+                  let suspended_context = {
+                    context with 
+                    suspended_via_call_to = BatSet.add func context.suspended_via_call_to;
+                    executing = false
+                  } in
+                  suspended_context
+              )
+          )
         
         | If { then_block = then_block; else_block = else_block } ->
           let () = printf "* if: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
@@ -112,7 +151,8 @@ let rec
               | (NoneType, NoneType) -> NoneType
               | (Bool, Bool) -> Bool
               | (Int, Int) -> Int
-              | _ -> NoneType (* TODO: Support union types *)
+              (* TODO: Support union types *)
+              | _ -> raise UnionTypesNotYetImplemented
             in
           
           let () = printf "* end if\n" in
@@ -149,17 +189,99 @@ let rec
     and
   
   (exec_func : exec_context -> func -> exec_context) context func =
-    let final_context = exec_list context func.body in
-    if final_context.executing then
-      (* Implicit return of NoneType at the end of a function's body *)
-      let returning_context = {
-        final_context with
-        returned_types = BatSet.add NoneType final_context.returned_types;
-        executing = false
+    (* Execute the function *)
+    let step0 = context in
+    let step1 = exec_list step0 func.body in
+    let step2 =
+      if step1.executing then
+        (* Implicit return of NoneType at the end of a function's body *)
+        let returning_context = {
+          step1 with
+          returned_types = BatSet.add NoneType step1.returned_types;
+          executing = false
+        } in
+        returning_context
+      else
+        step1
+      in
+    
+    (if BatSet.is_empty step2.suspended_via_call_to then
+      (* Body was not suspended anywhere,
+       * so we can return an exact return type to our caller *)
+      
+      let resumed_context = {
+        step2 with
+        (* NOTE: Redundant, but I want to be explicit *)
+        returned_types = step2.returned_types;
+        executing = true
       } in
-      returning_context
+      resumed_context
+    
     else
-      final_context
+      (* Body was suspended due to a recursive call to self,
+       * an ancestor function, or some combination. *)
+      
+      (if BatSet.mem func step2.suspended_via_call_to then
+        (* If body was suspended somewhere due to self,
+         * try to compute a better approx return type for self and
+         * reexecute the body *)
+        
+        match BatSet.to_list step2.returned_types with
+          | [] -> 
+            (* Unable to compute an approx return type for self at the moment... *)
+            if (BatSet.to_list step2.suspended_via_call_to) = [func] then
+              (* ...and will /never/ be able compute an approx return type
+               * since no ancestor caller is being depended on.
+               * 
+               * The body is making a hard dependency on the return type
+               * of self, but no further progress can be made in resolving
+               * a return type for self. *)
+              
+              (* Force resolve approx return type of self to Unreachable
+               * and reexecute body *)
+              let new_frame = { func = func; approx_return_type = Some Unreachable } in
+              let step0_again = {
+                step0 with
+                call_stack = new_frame :: BatList.tl step2.call_stack
+              } in
+              exec_func step0_again func
+              
+            else
+              (* ...and may be able to compute a better approx return type
+               * later because an ancestor caller is being depended on. *)
+              
+              (* Suspend execution of self within caller *)
+              let suspended_context = {
+                step2 with
+                suspended_via_call_to = BatSet.remove func step2.suspended_via_call_to;
+                executing = false
+              } in
+              suspended_context
+          
+          | [unique_return_type] ->
+            (* Improve approx return type of self and reexecute body *)
+            let new_frame = { func = func; approx_return_type = Some unique_return_type } in
+            let step0_again = {
+              step0 with
+              call_stack = new_frame :: BatList.tl step2.call_stack
+            } in
+            exec_func step0_again func
+            
+          | _ ->
+            raise UnionTypesNotYetImplemented (* TODO: Support union types *)
+        
+      else
+        (* If body was suspended due to ancestors only,
+         * suspend execution of self within caller *)
+        let suspended_context = {
+          step2 with
+          (* NOTE: This remove should be a no-op here. Leaving for consistency. *)
+          suspended_via_call_to = BatSet.remove func step2.suspended_via_call_to;
+          executing = false
+        } in
+        suspended_context
+      )
+    )
     and
   
   (exec_program : program -> exec_context) program =
@@ -173,7 +295,7 @@ let rec
       in
     let initial_context = {
       program = program;
-      call_stack = [main_func];
+      call_stack = [{ func = main_func; approx_return_type = None }];
       names = BatMap.of_enum (BatList.enum [(main_func.param_var, NoneType)]);
       returned_types = BatSet.empty;
       suspended_via_call_to = BatSet.empty;
