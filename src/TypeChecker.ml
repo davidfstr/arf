@@ -185,12 +185,8 @@ let rec
 let input1 = {
   funcs = [
     {
-      name = "main";
-      param_var = "x";
-      body = [
-        Return {
-          result_var = "x"
-        };
+      name = "main"; param_var = "x"; body = [
+        Return { result_var = "x" };
       ]
     }
   ]
@@ -200,16 +196,9 @@ let input1 = {
 let input2 = {
   funcs = [
     {
-      name = "main";
-      param_var = "x";
-      body = [
-        AssignLiteral {
-          target_var = "k";
-          literal = Int
-        };
-        Return {
-          result_var = "k"
-        };
+      name = "main"; param_var = "x"; body = [
+        AssignLiteral { target_var = "k"; literal = Int };
+        Return { result_var = "k" };
       ]
     }
   ]
@@ -219,26 +208,14 @@ let input2 = {
 let input3 = {
   funcs = [
     {
-      name = "main";
-      param_var = "x";
-      body = [
-        AssignCall {
-          target_var = "result";
-          func_name = "f";
-          arg_var = "x"
-        };
-        Return {
-          result_var = "result"
-        };
+      name = "main"; param_var = "x"; body = [
+        AssignCall { target_var = "result"; func_name = "f"; arg_var = "x" };
+        Return { result_var = "result" };
       ]
     };
     {
-      name = "f";
-      param_var = "n";
-      body = [
-        Return {
-          result_var = "n"
-        };
+      name = "f"; param_var = "n"; body = [
+        Return { result_var = "n" };
       ]
     };
   ]
@@ -248,46 +225,22 @@ let input3 = {
 let input4 = {
   funcs = [
     {
-      name = "main";
-      param_var = "x";
-      body = [
-        AssignLiteral {
-          target_var = "k";
-          literal = Int
-        };
-        AssignCall {
-          target_var = "result";
-          func_name = "fact";
-          arg_var = "k"
-        };
-        Return {
-          result_var = "result"
-        };
+      name = "main"; param_var = "x"; body = [
+        AssignLiteral { target_var = "k"; literal = Int };
+        AssignCall { target_var = "result"; func_name = "fact"; arg_var = "k" };
+        Return { result_var = "result" };
       ]
     };
     {
-      name = "fact";
-      param_var = "n";
-      body = [
+      name = "fact"; param_var = "n"; body = [
         If {
           then_block = [
-            AssignLiteral {
-              target_var = "k";
-              literal = Int
-            };
-            Return {
-              result_var = "k"
-            };
+            AssignLiteral { target_var = "k"; literal = Int };
+            Return { result_var = "k" };
           ];
           else_block = [
-            AssignCall {
-              target_var = "result";
-              func_name = "fact";
-              arg_var = "n"
-            };
-            Return {
-              result_var = "result"
-            };
+            AssignCall { target_var = "result"; func_name = "fact"; arg_var = "n" };
+            Return { result_var = "result" };
           ]
         };
       ]
