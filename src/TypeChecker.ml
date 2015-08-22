@@ -30,7 +30,7 @@ let sexp_of_exec_context context =
 
 exception NoSuchFunction of string
 
-let rec find_func (* func list -> string -> func *) func_list func_name =
+let rec (find_func : func list -> string -> func) func_list func_name =
   match func_list with
     | (head :: tail) ->
       if head.name = func_name then
@@ -53,7 +53,7 @@ let unique_item set =
 exception ProgramHasNoMainFunction
 
 let rec
-  exec (* exec_context -> stmt -> exec_context *) context stmt =
+  (exec : exec_context -> stmt -> exec_context) context stmt =
     if not context.executing then
       context
     else
@@ -107,7 +107,7 @@ let rec
           let () = printf "* else\n" in
           let else_result = exec_list context else_block in
           
-          let join (* typ -> typ -> typ *) typ1 typ2 = 
+          let (join : typ -> typ -> typ) typ1 typ2 = 
             match (typ1, typ2) with
               | (NoneType, NoneType) -> NoneType
               | (Bool, Bool) -> Bool
@@ -144,11 +144,11 @@ let rec
           returning_context
     and
   
-  exec_list (* exec_context -> stmt list -> exec_context *) context stmt_list =
+  (exec_list : exec_context -> stmt list -> exec_context) context stmt_list =
     BatList.fold_left exec context stmt_list
     and
   
-  exec_func (* exec_context -> func -> exec_context *) context func =
+  (exec_func : exec_context -> func -> exec_context) context func =
     let final_context = exec_list context func.body in
     if final_context.executing then
       (* Implicit return of NoneType at the end of a function's body *)
@@ -162,7 +162,7 @@ let rec
       final_context
     and
   
-  exec_program (* program -> exec_context *) program =
+  (exec_program : program -> exec_context) program =
     let main_func = 
       match program.funcs with
         | (head :: _) ->
