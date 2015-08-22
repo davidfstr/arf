@@ -20,7 +20,7 @@ type
     and
   stmt_AssignLiteral = {
     target_var : string;
-    literal : typ
+    literal : simple_typ
   } and
   stmt_AssignCall = {
     target_var : string;
@@ -35,12 +35,13 @@ type
     result_var : string
   } and
   
-  typ =
+  simple_typ =
     | NoneType
     | Bool
     | Int
     
-    (* Special type that indicates that an expression will never finish evaluating *)
+    (** Special type that indicates that an expression will never finish evaluating *)
+    (* TODO: Represent this special condition in an out-of-band way *)
     | Unreachable
   
   with sexp

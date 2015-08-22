@@ -1,6 +1,36 @@
 open Ast
 open Core.Std
 
+type typ =
+  (** Non-empty set of types that this value may have. *)
+  | UnionOf of simple_typ BatSet.t
+
+let (wrap : simple_typ BatSet.t -> typ) stypes =
+  let () = assert (not (BatSet.is_empty stypes)) in
+  UnionOf stypes
+
+let (unwrap : typ -> simple_typ BatSet.t) typ =
+  match typ with
+    | UnionOf stypes ->
+      stypes
+
+let (sexp_of_typ : typ -> Sexp.t) typ =
+  let open Core.Std.Sexp in
+  let stypes = unwrap typ in
+  match BatSet.to_list stypes with
+    | [] ->
+      (* NOTE: This is not a valid state for a typ *)
+      Atom "__empty__"
+      
+    | [unique_type] ->
+      sexp_of_simple_typ unique_type
+    
+    | _ ->
+      List [
+        Atom "UnionOf";
+        sexp_of_list sexp_of_simple_typ (BatSet.to_list stypes)
+      ]
+
 type frame = {
   (** The function executing in this frame. *)
   func : func;
@@ -24,12 +54,12 @@ type exec_context = {
   (** Set of local variables, and the type of value each one currently holds.
     * When entering a new function starts with the function parameters only. *)
   names : (string, typ) BatMap.t;
-  (** Within a function, the set of all types returned by various
+  (** Within a function, the set of all simple types returned by various
     * return statements in function. When entering a new function starts empty.
     * 
     * When returning from a function call, the set of types that could be
     * returned from the callee. *)
-  returned_types : typ BatSet.t;
+  returned_types : simple_typ BatSet.t;
   (** Set of functions that could not be called recursively because they
     * had no return type information available yet. Is always a subset of the
     * functions in the current call stack. When entering a new function starts empty. *)
@@ -56,7 +86,7 @@ let sexp_of_exec_context context =
   let open Core.Std.Sexp in
   List [
     List [Atom "names"; sexp_of_list sexp_of_string_typ (BatMap.bindings context.names)];
-    List [Atom "returned_types"; sexp_of_list sexp_of_typ (BatSet.to_list context.returned_types)];
+    List [Atom "returned_types"; sexp_of_list sexp_of_simple_typ (BatSet.to_list context.returned_types)];
     List [Atom "suspended_via_call_to"; sexp_of_list sexp_of_string (func_names (BatSet.to_list context.suspended_via_call_to))];
     List [Atom "executing"; Atom (string_of_bool context.executing)]
   ]
@@ -84,7 +114,6 @@ let unique_item set =
       raise SetHasNoUniqueElement
 
 exception ProgramHasNoMainFunction
-exception UnionTypesNotYetImplemented
 
 let rec
   (exec : exec_context -> stmt -> exec_context) context stmt =
@@ -94,9 +123,10 @@ let rec
       match stmt with
         | AssignLiteral { target_var = target_var; literal = literal } ->
           let () = printf "* assign: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
+          let literal_typ = UnionOf (BatSet.singleton literal) in
           let after_assign_context = {
             context with
-            names = BatMap.add target_var literal context.names
+            names = BatMap.add target_var literal_typ context.names
           } in
           after_assign_context
           
@@ -133,12 +163,11 @@ let rec
               
               let exit_func_context = exec_func enter_func_context func in
               if exit_func_context.executing then
-                (* TODO: Handle functions that can return multiple kinds of values *)
-                let returned_value = unique_item exit_func_context.returned_types in
+                let returned_typ = UnionOf exit_func_context.returned_types in
                 
                 let resumed_context = {
                   context with
-                  names = BatMap.add target_var returned_value context.names
+                  names = BatMap.add target_var returned_typ context.names
                 } in
                 resumed_context
               else
@@ -184,11 +213,8 @@ let rec
           
           let (join : typ -> typ -> typ) typ1 typ2 = 
             match (typ1, typ2) with
-              | (NoneType, NoneType) -> NoneType
-              | (Bool, Bool) -> Bool
-              | (Int, Int) -> Int
-              (* TODO: Support union types *)
-              | _ -> raise UnionTypesNotYetImplemented
+              | (UnionOf stypes1, UnionOf stypes2) ->
+                UnionOf (BatSet.union stypes1 stypes2)
             in
           
           let () = printf "* end if\n" in
@@ -211,10 +237,10 @@ let rec
         
         | Return { result_var = result_var } ->
           let () = printf "* return: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
-          let result_value = BatMap.find result_var context.names in
+          let result_typ = BatMap.find result_var context.names in
           let returning_context = {
             context with
-            returned_types = BatSet.add result_value context.returned_types;
+            returned_types = BatSet.union (unwrap result_typ) context.returned_types;
             executing = false
           } in
           returning_context
@@ -228,6 +254,7 @@ let rec
     (* Execute the function *)
     let step0 = context in
     let step1 = exec_list step0 func.body in
+    (* TODO: Rename to returned_context *)
     let step2 =
       if step1.executing then
         (* Implicit return of NoneType at the end of a function's body *)
@@ -262,49 +289,52 @@ let rec
          * try to compute a better approx return type for self and
          * reexecute the body *)
         
-        match BatSet.to_list step2.returned_types with
-          | [] -> 
-            (* Unable to compute an approx return type for self at the moment... *)
-            if (BatSet.to_list step2.suspended_via_call_to) = [func] then
-              (* ...and will /never/ be able compute an approx return type
-               * since no ancestor caller is being depended on.
-               * 
-               * The body is making a hard dependency on the return type
-               * of self, but no further progress can be made in resolving
-               * a return type for self. *)
-              
-              (* Force resolve approx return type of self to Unreachable
-               * and reexecute body *)
-              let new_frame = { func = func; approx_return_type = Some Unreachable } in
-              let step0_again = {
-                step0 with
-                call_stack = new_frame :: BatList.tl step2.call_stack
-              } in
-              exec_func step0_again func
-              
-            else
-              (* ...and may be able to compute a better approx return type
-               * later because an ancestor caller is being depended on. *)
-              
-              (* Suspend execution of self within caller *)
-              let suspended_context = {
-                step2 with
-                suspended_via_call_to = BatSet.remove func step2.suspended_via_call_to;
-                executing = false
-              } in
-              suspended_context
-          
-          | [unique_return_type] ->
-            (* Improve approx return type of self and reexecute body *)
-            let new_frame = { func = func; approx_return_type = Some unique_return_type } in
+        if BatSet.is_empty step2.returned_types then
+          (* Unable to compute an approx return type for self at the moment... *)
+          (if (BatSet.to_list step2.suspended_via_call_to) = [func] then
+            (* ...and will /never/ be able compute an approx return type
+             * since no ancestor caller is being depended on.
+             * 
+             * The body is making a hard dependency on the return type
+             * of self, but no further progress can be made in resolving
+             * a return type for self. *)
+            
+            (* Force resolve approx return type of self to Unreachable
+             * and reexecute body *)
+            (* TODO: Ensure receiving AssignCall recognizes this case *)
+            let new_frame = {
+              func = func;
+              approx_return_type = Some (wrap (BatSet.singleton Unreachable))
+            } in
             let step0_again = {
               step0 with
               call_stack = new_frame :: BatList.tl step2.call_stack
             } in
             exec_func step0_again func
             
-          | _ ->
-            raise UnionTypesNotYetImplemented (* TODO: Support union types *)
+          else
+            (* ...and may be able to compute a better approx return type
+             * later because an ancestor caller is being depended on. *)
+            
+            (* Suspend execution of self within caller *)
+            let suspended_context = {
+              step2 with
+              suspended_via_call_to = BatSet.remove func step2.suspended_via_call_to;
+              executing = false
+            } in
+            suspended_context
+          )
+        else
+          (* Improve approx return type of self and reexecute body *)
+          let new_frame = {
+            func = func;
+            approx_return_type = Some (wrap step2.returned_types)
+          } in
+          let step0_again = {
+            step0 with
+            call_stack = new_frame :: BatList.tl step2.call_stack
+          } in
+          exec_func step0_again func
         
       else
         (* If body was suspended due to ancestors only,
@@ -332,7 +362,10 @@ let rec
     let initial_context = {
       program = program;
       call_stack = [{ func = main_func; approx_return_type = None }];
-      names = BatMap.of_enum (BatList.enum [(main_func.param_var, NoneType)]);
+      names = BatMap.of_enum (BatList.enum [(
+        main_func.param_var,
+        wrap (BatSet.singleton NoneType)
+      )]);
       returned_types = BatSet.empty;
       suspended_via_call_to = BatSet.empty;
       executing = true
@@ -418,5 +451,24 @@ let input5 = {
   ]
 }
 
-let output = exec_program input5
+let input6 = {
+  funcs = [
+    {
+      name = "returns_int_or_bool"; param_var = "_"; body = [
+        If {
+          then_block = [
+            AssignLiteral { target_var = "k"; literal = Int };
+            Return { result_var = "k" };
+          ];
+          else_block = [
+            AssignLiteral { target_var = "k"; literal = Bool };
+            Return { result_var = "k" };
+          ]
+        };
+      ]
+    }
+  ]
+}
+
+let output = exec_program input6
 let () = printf "%s\n" (Sexp.to_string (sexp_of_exec_context output))
