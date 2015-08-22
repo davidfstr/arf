@@ -31,16 +31,25 @@ let (sexp_of_typ : typ -> Sexp.t) typ =
         sexp_of_list sexp_of_simple_typ (BatSet.to_list stypes)
       ]
 
+type func_return_typ =
+  (** Return type that is in the process of being calculated,
+    * since the function has not yet completed one full execution pass. *)
+  | ReturnsBeingCalculated
+  (** Approximate return type that may be at least one of the specified
+    * simple types, but may be extended with additional simple types
+    * on subsequent execution passes of the function. *)
+  | ReturnsAtLeast of typ
+  (** Special return type that indicates that the function
+    * provably never terminates. *)
+  | NeverReturns
+
 type frame = {
   (** The function executing in this frame. *)
   func : func;
-  (** Approximate return type of the function in this frame.
-    * May be extended with additional union members while the function
-    * is still executing and computing its fix point.
-    * 
-    * May be None if the function has not yet completed one full execution
-    * pass and has no return type information available. *)
-  approx_return_type : typ option
+  (** Approximate return type of the function in this frame,
+    * which may be extended while the function is still executing 
+    * and computing its fix point. *)
+  approx_return_type : func_return_typ
 }
 
 (** Interpreter state while executing statements in a program. *)
@@ -151,7 +160,10 @@ let rec
               let () = printf "* call#nonrec: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
               
               let arg_value = BatMap.find arg_var context.names in
-              let new_frame = { func = func; approx_return_type = None } in
+              let new_frame = {
+                func = func;
+                approx_return_type = ReturnsBeingCalculated
+              } in
               let enter_func_context = {
                 context with
                 call_stack = new_frame :: context.call_stack;
@@ -181,7 +193,7 @@ let rec
             | Some prior_frame_with_func ->
               (* Recursive call *)
               (match prior_frame_with_func.approx_return_type with
-                | Some approx_return_type ->
+                | ReturnsAtLeast approx_return_type ->
                   (* Use the approx return type as the result and continue *)
                   let () = printf "* call#rec#resume: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
                   
@@ -191,13 +203,25 @@ let rec
                   } in
                   resumed_context
                 
-                | None ->
+                | ReturnsBeingCalculated ->
                   (* No approx return type available yet? Suspend execution *)
-                  let () = printf "* call#rec#suspend: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
+                  let () = printf "* call#rec#suspend#1: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
                   
                   let suspended_context = {
                     context with 
                     suspended_via_call_to = BatSet.add func context.suspended_via_call_to;
+                    executing = false
+                  } in
+                  suspended_context
+                
+                | NeverReturns ->
+                  (* Never returns? Suspend execution *)
+                  let () = printf "* call#rec#suspend#2: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
+                  
+                  let suspended_context = {
+                    context with
+                    (* NOTE: Redundant, but I want to be explicit *)
+                    suspended_via_call_to = context.suspended_via_call_to;
                     executing = false
                   } in
                   suspended_context
@@ -301,10 +325,9 @@ let rec
             
             (* Force resolve approx return type of self to Unreachable
              * and reexecute body *)
-            (* TODO: Ensure receiving AssignCall recognizes this case *)
             let new_frame = {
               func = func;
-              approx_return_type = Some (wrap (BatSet.singleton Unreachable))
+              approx_return_type = NeverReturns
             } in
             let step0_again = {
               step0 with
@@ -328,7 +351,7 @@ let rec
           (* Improve approx return type of self and reexecute body *)
           let new_frame = {
             func = func;
-            approx_return_type = Some (wrap step2.returned_types)
+            approx_return_type = ReturnsAtLeast (wrap step2.returned_types)
           } in
           let step0_again = {
             step0 with
@@ -361,7 +384,10 @@ let rec
       in
     let initial_context = {
       program = program;
-      call_stack = [{ func = main_func; approx_return_type = None }];
+      call_stack = [{
+        func = main_func;
+        approx_return_type = ReturnsBeingCalculated
+      }];
       names = BatMap.of_enum (BatList.enum [(
         main_func.param_var,
         wrap (BatSet.singleton NoneType)

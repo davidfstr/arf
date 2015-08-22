@@ -39,9 +39,5 @@ type
     | NoneType
     | Bool
     | Int
-    
-    (** Special type that indicates that an expression will never finish evaluating *)
-    (* TODO: Represent this special condition in an out-of-band way *)
-    | Unreachable
   
   with sexp
