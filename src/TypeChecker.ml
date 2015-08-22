@@ -468,6 +468,8 @@ let input4 = {
   ]
 }
 
+(* Program: Call self in infinite loop.
+ * Ensure type checker doesn't get caught in an infinite loop itself. *)
 let input5 = {
   funcs = [
     {
@@ -479,6 +481,8 @@ let input5 = {
   ]
 }
 
+(* Program: Return either an Int or a Bool.
+ * Ensure type checker recognizes that a function can return multiple types. *)
 let input6 = {
   funcs = [
     {
@@ -498,5 +502,54 @@ let input6 = {
   ]
 }
 
-let output = exec_program input4
+(* Program: Deep call chain of interlinked functions.
+ * Ensure type checker can evaluate in linear time rather than exponential. *)
+let call func_name = [
+  AssignCall { target_var = "_"; func_name = func_name; arg_var = "_" };
+  Return { result_var = "_" };
+]
+let if_then_call_else_call func_name = [
+  If {
+    then_block = call func_name;
+    else_block = call func_name
+  };
+]
+let input7 = {
+  funcs = [
+    { name = "f1"; param_var = "_"; body = if_then_call_else_call "f2" };
+    { name = "f2"; param_var = "_"; body = if_then_call_else_call "f3" };
+    { name = "f3"; param_var = "_"; body = if_then_call_else_call "f4" };
+    { name = "f4"; param_var = "_"; body = if_then_call_else_call "f5" };
+    { name = "f5"; param_var = "_"; body = if_then_call_else_call "f6" };
+    { name = "f6"; param_var = "_"; body = if_then_call_else_call "f7" };
+    { name = "f7"; param_var = "_"; body = if_then_call_else_call "f8" };
+    { name = "f8"; param_var = "_"; body = if_then_call_else_call "f9" };
+    { name = "f9"; param_var = "_"; body = if_then_call_else_call "f10" };
+    { name = "f10"; param_var = "_"; body = if_then_call_else_call "f11" };
+    { name = "f11"; param_var = "_"; body = if_then_call_else_call "f12" };
+    { name = "f12"; param_var = "_"; body = if_then_call_else_call "f13" };
+    { name = "f13"; param_var = "_"; body = if_then_call_else_call "f14" };
+    { name = "f14"; param_var = "_"; body = if_then_call_else_call "f15" };
+    { name = "f15"; param_var = "_"; body = if_then_call_else_call "f16" };
+    { name = "f16"; param_var = "_"; body = if_then_call_else_call "f17" };
+    { name = "f17"; param_var = "_"; body = if_then_call_else_call "f18" };
+    { name = "f18"; param_var = "_"; body = if_then_call_else_call "f19" };
+    { name = "f19"; param_var = "_"; body = if_then_call_else_call "f20" };
+    { name = "f20"; param_var = "_"; body = if_then_call_else_call "f21" };
+    { name = "f21"; param_var = "_"; body = if_then_call_else_call "f22" };
+    { name = "f22"; param_var = "_"; body = if_then_call_else_call "f23" };
+    { name = "f23"; param_var = "_"; body = if_then_call_else_call "f24" };
+    { name = "f24"; param_var = "_"; body = if_then_call_else_call "f25" };
+    { name = "f25"; param_var = "_"; body = if_then_call_else_call "f26" };
+    { name = "f26"; param_var = "_"; body = if_then_call_else_call "f27" };
+    { name = "f27"; param_var = "_"; body = if_then_call_else_call "f28" };
+    { name = "f28"; param_var = "_"; body = if_then_call_else_call "f29" };
+    { name = "f29"; param_var = "_"; body = if_then_call_else_call "f30" };
+    { name = "f30"; param_var = "_"; body = if_then_call_else_call "f31" };
+    { name = "f31"; param_var = "_"; body = if_then_call_else_call "f32" };
+    { name = "f32"; param_var = "_"; body = [] };
+  ]
+}
+
+let output = exec_program input7
 let () = printf "%s\n" (Sexp.to_string (sexp_of_exec_context output))
