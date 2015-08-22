@@ -370,5 +370,16 @@ let input4 = {
   ]
 }
 
-let output = exec_program input4
+let input5 = {
+  funcs = [
+    {
+      name = "infinite_loop"; param_var = "x"; body = [
+        AssignCall { target_var = "x"; func_name = "infinite_loop"; arg_var = "x" };
+        Return { result_var = "x" };
+      ]
+    }
+  ]
+}
+
+let output = exec_program input5
 let () = printf "%s\n" (Sexp.to_string (sexp_of_exec_context output))
