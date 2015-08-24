@@ -162,8 +162,7 @@ let rec
           
           let (continue_with_call_result : exec_context -> exec_context) exit_func_context =
             if exit_func_context.executing then
-              (* TODO: Use `wrap`, which asserts that the set is non-empty *)
-              let returned_typ = UnionOf exit_func_context.returned_types in
+              let returned_typ = wrap exit_func_context.returned_types in
               
               let resumed_context = {
                 exit_func_context with
@@ -376,7 +375,7 @@ let rec
     let () = printf "* end func '%s': %s\n" func.name (Sexp.to_string (sexp_of_exec_context step2)) in
     
     (* TODO: Shouldn't this be checking step2.executing to be more reliable? *)
-    (if BatSet.is_empty step2.targets_of_recursion_suspended_calls then
+    (if step2.executing then
       (* Body was not suspended anywhere,
        * so we can return an exact return type to our caller *)
       
@@ -391,8 +390,10 @@ let rec
       resumed_context
     
     else
-      (* Body was suspended due to a recursive call to self,
-       * an ancestor function, or some combination. *)
+      (* Body was suspended due to either
+       * (1) a recursive call to self, an ancestor function,
+       *     or some combination; or
+       * (2) an optimizing suspension. *)
       
       (if BatSet.mem func step2.targets_of_recursion_suspended_calls then
         (* If body was suspended somewhere due to self,
@@ -448,7 +449,9 @@ let rec
           exec_func_body step0_again func
         
       else
-        (* If body was suspended due to ancestors only,
+        (* If body was suspended due to either
+         *    (1) ancestors only or
+         *    (2) an optimizing suspension,
          * suspend execution of self within caller *)
         let call_status = Suspended in
         let suspended_context = {
@@ -482,6 +485,9 @@ let rec
       cached_calls = BatMap.empty
     } in
     exec_func initial_context main_func (wrap (BatSet.singleton NoneType))
+
+(* -------------------------------------------------------------------------- *)
+(* Tests *)
 
 (* Program: Returns main's argument, namely NoneType. *)
 let input1 = {
@@ -597,44 +603,63 @@ let if_then_call_else_call func_name = [
     else_block = call func_name
   };
 ]
+let deep_func_chain first_func_body last_func_body = [
+  { name = "f1"; param_var = "_"; body = if_then_call_else_call "f2" };
+  { name = "f2"; param_var = "_"; body = if_then_call_else_call "f3" };
+  { name = "f3"; param_var = "_"; body = if_then_call_else_call "f4" };
+  { name = "f4"; param_var = "_"; body = if_then_call_else_call "f5" };
+  { name = "f5"; param_var = "_"; body = if_then_call_else_call "f6" };
+  { name = "f6"; param_var = "_"; body = if_then_call_else_call "f7" };
+  { name = "f7"; param_var = "_"; body = if_then_call_else_call "f8" };
+  { name = "f8"; param_var = "_"; body = if_then_call_else_call "f9" };
+  { name = "f9"; param_var = "_"; body = if_then_call_else_call "f10" };
+  { name = "f10"; param_var = "_"; body = if_then_call_else_call "f11" };
+  { name = "f11"; param_var = "_"; body = if_then_call_else_call "f12" };
+  { name = "f12"; param_var = "_"; body = if_then_call_else_call "f13" };
+  { name = "f13"; param_var = "_"; body = if_then_call_else_call "f14" };
+  { name = "f14"; param_var = "_"; body = if_then_call_else_call "f15" };
+  { name = "f15"; param_var = "_"; body = if_then_call_else_call "f16" };
+  { name = "f16"; param_var = "_"; body = if_then_call_else_call "f17" };
+  { name = "f17"; param_var = "_"; body = if_then_call_else_call "f18" };
+  { name = "f18"; param_var = "_"; body = if_then_call_else_call "f19" };
+  { name = "f19"; param_var = "_"; body = if_then_call_else_call "f20" };
+  { name = "f20"; param_var = "_"; body = if_then_call_else_call "f21" };
+  { name = "f21"; param_var = "_"; body = if_then_call_else_call "f22" };
+  { name = "f22"; param_var = "_"; body = if_then_call_else_call "f23" };
+  { name = "f23"; param_var = "_"; body = if_then_call_else_call "f24" };
+  { name = "f24"; param_var = "_"; body = if_then_call_else_call "f25" };
+  { name = "f25"; param_var = "_"; body = if_then_call_else_call "f26" };
+  { name = "f26"; param_var = "_"; body = if_then_call_else_call "f27" };
+  { name = "f27"; param_var = "_"; body = if_then_call_else_call "f28" };
+  { name = "f28"; param_var = "_"; body = if_then_call_else_call "f29" };
+  { name = "f29"; param_var = "_"; body = if_then_call_else_call "f30" };
+  { name = "f30"; param_var = "_"; body = if_then_call_else_call "f31" };
+  { name = "f31"; param_var = "_"; body = if_then_call_else_call "f32" };
+  (* TODO: See whether having f32 call f1 makes a difference in performance *)
+  (* TODO: See whether having f1..32 call f1 makes a difference in performance *)
+  (* TODO: See whether having f1..32 call f1..32 makes a difference in performance *)
+  { name = "f32"; param_var = "_"; body = last_func_body };
+]
 let input7 = {
-  funcs = [
-    { name = "f1"; param_var = "_"; body = if_then_call_else_call "f2" };
-    { name = "f2"; param_var = "_"; body = if_then_call_else_call "f3" };
-    { name = "f3"; param_var = "_"; body = if_then_call_else_call "f4" };
-    { name = "f4"; param_var = "_"; body = if_then_call_else_call "f5" };
-    { name = "f5"; param_var = "_"; body = if_then_call_else_call "f6" };
-    { name = "f6"; param_var = "_"; body = if_then_call_else_call "f7" };
-    { name = "f7"; param_var = "_"; body = if_then_call_else_call "f8" };
-    { name = "f8"; param_var = "_"; body = if_then_call_else_call "f9" };
-    { name = "f9"; param_var = "_"; body = if_then_call_else_call "f10" };
-    { name = "f10"; param_var = "_"; body = if_then_call_else_call "f11" };
-    { name = "f11"; param_var = "_"; body = if_then_call_else_call "f12" };
-    { name = "f12"; param_var = "_"; body = if_then_call_else_call "f13" };
-    { name = "f13"; param_var = "_"; body = if_then_call_else_call "f14" };
-    { name = "f14"; param_var = "_"; body = if_then_call_else_call "f15" };
-    { name = "f15"; param_var = "_"; body = if_then_call_else_call "f16" };
-    { name = "f16"; param_var = "_"; body = if_then_call_else_call "f17" };
-    { name = "f17"; param_var = "_"; body = if_then_call_else_call "f18" };
-    { name = "f18"; param_var = "_"; body = if_then_call_else_call "f19" };
-    { name = "f19"; param_var = "_"; body = if_then_call_else_call "f20" };
-    { name = "f20"; param_var = "_"; body = if_then_call_else_call "f21" };
-    { name = "f21"; param_var = "_"; body = if_then_call_else_call "f22" };
-    { name = "f22"; param_var = "_"; body = if_then_call_else_call "f23" };
-    { name = "f23"; param_var = "_"; body = if_then_call_else_call "f24" };
-    { name = "f24"; param_var = "_"; body = if_then_call_else_call "f25" };
-    { name = "f25"; param_var = "_"; body = if_then_call_else_call "f26" };
-    { name = "f26"; param_var = "_"; body = if_then_call_else_call "f27" };
-    { name = "f27"; param_var = "_"; body = if_then_call_else_call "f28" };
-    { name = "f28"; param_var = "_"; body = if_then_call_else_call "f29" };
-    { name = "f29"; param_var = "_"; body = if_then_call_else_call "f30" };
-    { name = "f30"; param_var = "_"; body = if_then_call_else_call "f31" };
-    { name = "f31"; param_var = "_"; body = if_then_call_else_call "f32" };
-    (* TODO: See whether having f32 call f1 makes a difference in performance *)
-    (* TODO: See whether having f1..32 call f1 makes a difference in performance *)
-    (* TODO: See whether having f1..32 call f1..32 makes a difference in performance *)
-    { name = "f32"; param_var = "_"; body = [] };
-  ]
+  funcs = deep_func_chain
+    (if_then_call_else_call "f2")
+    []
+}
+
+(* Program: Deep call chain of interlinked functions,
+ *          where last function calls first function,
+ *          and first function may return a constant.
+ * Ensure type checker can evaluate in linear time rather than exponential. *)
+let return_nothing = [Return { result_var = "_" }]
+let input8 = {
+  funcs = deep_func_chain
+    [
+      If {
+        then_block = call "f2";
+        else_block = return_nothing
+      };
+    ]
+    (call "f1")
 }
 
 (* TODO: See whether having f1 call both f2#Int and f2#Bool, where f2 is the
@@ -649,5 +674,8 @@ let input7 = {
 (* TODO: See whether having f1..32 call f1..32, with all possible argument types,
  *       makes a difference in performance *)
 
-let output = exec_program input6
+(* -------------------------------------------------------------------------- *)
+(* Main *)
+
+let output = exec_program input8
 let () = printf "%s\n" (Sexp.to_string (sexp_of_exec_context output))
