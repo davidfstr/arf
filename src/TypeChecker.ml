@@ -52,6 +52,13 @@ type frame = {
   approx_return_type : func_return_typ
 }
 
+type call_status =
+  | Executing
+  | Suspended
+  | CompletedWithResult of typ
+  | NeverCompletes
+  with sexp_of
+
 (** Interpreter state while executing statements in a program. *)
 type exec_context = {
   (** Program that is being executed. *)
@@ -72,7 +79,7 @@ type exec_context = {
   (** Set of functions that could not be called recursively because they
     * had no return type information available yet. Is always a subset of the
     * functions in the current call stack. When entering a new function starts empty. *)
-  suspended_via_call_to : func BatSet.t;  (* contains_suspensions_due_to *)
+  targets_of_recursion_suspended_calls : func BatSet.t;
   (** Within a function, whether the current block is still executing and isn't
     * suspended due to abrupt termination (via a return) or inability to make
     * progress on a function call. When entering a new function starts true.
@@ -80,7 +87,11 @@ type exec_context = {
     * When returning from a function call, whether the caller should continue
     * execution. If false then the caller should be suspended because the
     * callee did not have enough information to generate a return type. *)
-  executing : bool
+  executing : bool;
+  (** Total set of calls that the interpreter is in the process of executing
+    * or has finished executing. Tracked so that repeated calls to the same
+    * function can be optimized away. *)
+  cached_calls : ((func * typ), call_status) BatMap.t
 }
 
 let (sexp_of_string_typ : (string * typ) -> Sexp.t) binding =
@@ -91,13 +102,19 @@ let (sexp_of_string_typ : (string * typ) -> Sexp.t) binding =
 let func_names func_list =
   BatList.map (fun f -> f.name) func_list
 
+let (sexp_of_func_typ_call_status : ((func * typ) * call_status) -> Sexp.t) cached_call =
+  let open Core.Std.Sexp in
+  let ((f, t), cs) = cached_call in
+  List [Atom f.name; sexp_of_typ t; sexp_of_call_status cs]
+
 let sexp_of_exec_context context =
   let open Core.Std.Sexp in
   List [
     List [Atom "names"; sexp_of_list sexp_of_string_typ (BatMap.bindings context.names)];
     List [Atom "returned_types"; sexp_of_list sexp_of_simple_typ (BatSet.to_list context.returned_types)];
-    List [Atom "suspended_via_call_to"; sexp_of_list sexp_of_string (func_names (BatSet.to_list context.suspended_via_call_to))];
-    List [Atom "executing"; Atom (string_of_bool context.executing)]
+    List [Atom "targets_of_recursion_suspended_calls"; sexp_of_list sexp_of_string (func_names (BatSet.to_list context.targets_of_recursion_suspended_calls))];
+    List [Atom "executing"; Atom (string_of_bool context.executing)];
+    List [Atom "cached_calls"; sexp_of_list sexp_of_func_typ_call_status (BatMap.bindings context.cached_calls)];
   ]
 
 exception NoSuchFunction of string
@@ -141,99 +158,150 @@ let rec
           
         | AssignCall { target_var = target_var; func_name = func_name; arg_var = arg_var } ->
           let func = find_func context.program.funcs func_name in
+          let arg_value = BatMap.find arg_var context.names in
           
-          let rec (find_frame_with_func : frame list -> func -> frame option) frame_list func =
-            match frame_list with
-              | (head :: tail) ->
-                if head.func = func then
-                  Some head
-                else
-                  find_frame_with_func tail func
+          let (continue_with_call_result : exec_context -> exec_context) exit_func_context =
+            if exit_func_context.executing then
+              let returned_typ = UnionOf exit_func_context.returned_types in
               
-              | [] ->
-                None
+              let resumed_context = {
+                exit_func_context with
+                names = BatMap.add target_var returned_typ exit_func_context.names
+              } in
+              resumed_context
+            else
+              let suspended_context = {
+                exit_func_context with
+                (* NOTE: Redundant, but I want to be explicit *)
+                executing = false
+              } in
+              suspended_context
             in
           
-          (match find_frame_with_func context.call_stack func with
-            | None ->
-              (* Non-recursive call *)
-              let () = printf "* call#nonrec: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
-              
-              let arg_value = BatMap.find arg_var context.names in
-              let new_frame = {
-                func = func;
-                approx_return_type = ReturnsBeingCalculated
-              } in
-              let enter_func_context = {
-                context with
-                call_stack = new_frame :: context.call_stack;
-                names = BatMap.of_enum (BatList.enum [(func.param_var, arg_value)]);
-                returned_types = BatSet.empty;
-                suspended_via_call_to = BatSet.empty;
-                executing = true
-              } in
-              
-              let exit_func_context = exec_func enter_func_context func in
-              if exit_func_context.executing then
-                let returned_typ = UnionOf exit_func_context.returned_types in
+          if BatMap.mem (func, arg_value) context.cached_calls then
+            match BatMap.find (func, arg_value) context.cached_calls with
+              | Executing
+              | Suspended ->
+                (* Perform an optimizing-suspension *)
+                let () = printf "* call#cached#skip: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
                 
-                let resumed_context = {
-                  context with
-                  names = BatMap.add target_var returned_typ context.names
-                } in
-                resumed_context
-              else
                 let suspended_context = {
-                  exit_func_context with
+                  context with 
+                  (* NOTE: This is a optimizing-suspension rather than a
+                   *       recursion-suspension. Therefore we don't track
+                   *       the call target. *)
                   (* NOTE: Redundant, but I want to be explicit *)
+                  targets_of_recursion_suspended_calls = context.targets_of_recursion_suspended_calls;
                   executing = false
                 } in
                 suspended_context
+              
+              | CompletedWithResult result_type ->
+                (* Use the cached return type *)
+                let () = printf "* call#cached#continue: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
+                    
+                let exit_func_context = {
+                  context with
+                  returned_types = unwrap result_type
+                } in
+                continue_with_call_result exit_func_context
+              
+              | NeverCompletes ->
+                (* Never returns? Suspend execution *)
+                let () = printf "* call#cached#neverreturn: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
+                    
+                let suspended_context = {
+                  context with
+                  (* NOTE: Redundant, but I want to be explicit *)
+                  targets_of_recursion_suspended_calls = context.targets_of_recursion_suspended_calls;
+                  executing = false
+                } in
+                suspended_context
+                
+          else
+            let rec (find_frame_with_func : frame list -> func -> frame option) frame_list func =
+              match frame_list with
+                | (head :: tail) ->
+                  if head.func = func then
+                    Some head
+                  else
+                    find_frame_with_func tail func
+                
+                | [] ->
+                  None
+              in
             
-            | Some prior_frame_with_func ->
-              (* Recursive call *)
-              (match prior_frame_with_func.approx_return_type with
-                | ReturnsAtLeast approx_return_type ->
-                  (* Use the approx return type as the result and continue *)
-                  let () = printf "* call#rec#resume: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
-                  
-                  let resumed_context = {
-                    context with
-                    names = BatMap.add target_var approx_return_type context.names
-                  } in
-                  resumed_context
+            (match find_frame_with_func context.call_stack func with
+              | None ->
+                (* Non-recursive call *)
+                let () = printf "* call#nonrec: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
                 
-                | ReturnsBeingCalculated ->
-                  (* No approx return type available yet? Suspend execution *)
-                  let () = printf "* call#rec#suspend#1: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
-                  
-                  let suspended_context = {
-                    context with 
-                    suspended_via_call_to = BatSet.add func context.suspended_via_call_to;
-                    executing = false
-                  } in
-                  suspended_context
+                let new_frame = {
+                  func = func;
+                  approx_return_type = ReturnsBeingCalculated
+                } in
+                let enter_func_context = {
+                  context with
+                  call_stack = new_frame :: context.call_stack;
+                  names = BatMap.of_enum (BatList.enum [(func.param_var, arg_value)]);
+                  returned_types = BatSet.empty;
+                  targets_of_recursion_suspended_calls = BatSet.empty;
+                  executing = true;
+                  cached_calls = BatMap.add (func, arg_value) Executing context.cached_calls
+                } in
                 
-                | NeverReturns ->
-                  (* Never returns? Suspend execution *)
-                  let () = printf "* call#rec#suspend#2: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
+                let exit_func_context = exec_func enter_func_context func in
+                continue_with_call_result exit_func_context
+              
+              | Some prior_frame_with_func ->
+                (* Recursive call *)
+                (match prior_frame_with_func.approx_return_type with
+                  | ReturnsAtLeast approx_return_type ->
+                    (* Use the approx return type as the result and continue *)
+                    let () = printf "* call#rec#resume: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
+                    
+                    let resumed_context = {
+                      context with
+                      names = BatMap.add target_var approx_return_type context.names
+                    } in
+                    resumed_context
                   
-                  let suspended_context = {
-                    context with
-                    (* NOTE: Redundant, but I want to be explicit *)
-                    suspended_via_call_to = context.suspended_via_call_to;
-                    executing = false
-                  } in
-                  suspended_context
-              )
-          )
+                  | ReturnsBeingCalculated ->
+                    (* No approx return type available yet? Suspend execution *)
+                    let () = printf "* call#rec#suspend: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
+                    
+                    let suspended_context = {
+                      context with 
+                      targets_of_recursion_suspended_calls = BatSet.add func context.targets_of_recursion_suspended_calls;
+                      executing = false
+                    } in
+                    suspended_context
+                  
+                  | NeverReturns ->
+                    (* Never returns? Suspend execution *)
+                    let () = printf "* call#rec#neverreturn: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
+                    
+                    let suspended_context = {
+                      context with
+                      (* NOTE: Redundant, but I want to be explicit *)
+                      targets_of_recursion_suspended_calls = context.targets_of_recursion_suspended_calls;
+                      executing = false
+                    } in
+                    suspended_context
+                )
+            )
         
         | If { then_block = then_block; else_block = else_block } ->
           let () = printf "* if: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
           let () = printf "* then\n" in
           let then_result = exec_list context then_block in
+          let () = printf "* end then: %s\n" (Sexp.to_string (sexp_of_exec_context then_result)) in
           let () = printf "* else\n" in
-          let else_result = exec_list context else_block in
+          let else_result = exec_list
+            (* TODO: Almost certainly need to be taking more state from then_result... *)
+            { context with cached_calls = then_result.cached_calls }
+            else_block in
+          let () = printf "* end else: %s\n" (Sexp.to_string (sexp_of_exec_context else_result)) in
           
           let (join : typ -> typ -> typ) typ1 typ2 = 
             match (typ1, typ2) with
@@ -241,7 +309,6 @@ let rec
                 UnionOf (BatSet.union stypes1 stypes2)
             in
           
-          let () = printf "* end if\n" in
           let joined_result = {
             program = context.program;
             call_stack = context.call_stack;
@@ -252,11 +319,13 @@ let rec
             returned_types = BatSet.union
               then_result.returned_types
               else_result.returned_types;
-            suspended_via_call_to = BatSet.union
-              then_result.suspended_via_call_to
-              else_result.suspended_via_call_to;
-            executing = then_result.executing || else_result.executing
+            targets_of_recursion_suspended_calls = BatSet.union
+              then_result.targets_of_recursion_suspended_calls
+              else_result.targets_of_recursion_suspended_calls;
+            executing = then_result.executing || else_result.executing;
+            cached_calls = else_result.cached_calls
           } in
+          let () = printf "* end if: %s\n" (Sexp.to_string (sexp_of_exec_context joined_result)) in
           joined_result
         
         | Return { result_var = result_var } ->
@@ -275,6 +344,8 @@ let rec
     and
   
   (exec_func : exec_context -> func -> exec_context) context func =
+    let arg_value = BatMap.find func.param_var context.names in
+    
     (* Execute the function *)
     let () = printf "* func '%s': %s\n" func.name (Sexp.to_string (sexp_of_exec_context context)) in
     let step0 = context in
@@ -294,15 +365,18 @@ let rec
       in
     let () = printf "* end func '%s': %s\n" func.name (Sexp.to_string (sexp_of_exec_context step2)) in
     
-    (if BatSet.is_empty step2.suspended_via_call_to then
+    (* TODO: Shouldn't this be checking step2.executing to be more reliable? *)
+    (if BatSet.is_empty step2.targets_of_recursion_suspended_calls then
       (* Body was not suspended anywhere,
        * so we can return an exact return type to our caller *)
       
+      let call_status = CompletedWithResult (wrap step2.returned_types) in
       let resumed_context = {
         step2 with
         (* NOTE: Redundant, but I want to be explicit *)
         returned_types = step2.returned_types;
-        executing = true
+        executing = true;
+        cached_calls = BatMap.add (func, arg_value) call_status step2.cached_calls
       } in
       resumed_context
     
@@ -310,14 +384,14 @@ let rec
       (* Body was suspended due to a recursive call to self,
        * an ancestor function, or some combination. *)
       
-      (if BatSet.mem func step2.suspended_via_call_to then
+      (if BatSet.mem func step2.targets_of_recursion_suspended_calls then
         (* If body was suspended somewhere due to self,
          * try to compute a better approx return type for self and
          * reexecute the body *)
         
         if BatSet.is_empty step2.returned_types then
           (* Unable to compute an approx return type for self at the moment... *)
-          (if (BatSet.to_list step2.suspended_via_call_to) = [func] then
+          (if (BatSet.to_list step2.targets_of_recursion_suspended_calls) = [func] then
             (* ...and will /never/ be able compute an approx return type
              * since no ancestor caller is being depended on.
              * 
@@ -342,10 +416,12 @@ let rec
              * later because an ancestor caller is being depended on. *)
             
             (* Suspend execution of self within caller *)
+            let call_status = Suspended in
             let suspended_context = {
               step2 with
-              suspended_via_call_to = BatSet.remove func step2.suspended_via_call_to;
-              executing = false
+              targets_of_recursion_suspended_calls = BatSet.remove func step2.targets_of_recursion_suspended_calls;
+              executing = false;
+              cached_calls = BatMap.add (func, arg_value) call_status step2.cached_calls
             } in
             suspended_context
           )
@@ -364,11 +440,13 @@ let rec
       else
         (* If body was suspended due to ancestors only,
          * suspend execution of self within caller *)
+        let call_status = Suspended in
         let suspended_context = {
           step2 with
           (* NOTE: This remove should be a no-op here. Leaving for consistency. *)
-          suspended_via_call_to = BatSet.remove func step2.suspended_via_call_to;
-          executing = false
+          targets_of_recursion_suspended_calls = BatSet.remove func step2.targets_of_recursion_suspended_calls;
+          executing = false;
+          cached_calls = BatMap.add (func, arg_value) call_status step2.cached_calls
         } in
         suspended_context
       )
@@ -384,6 +462,8 @@ let rec
         | [] ->
           raise ProgramHasNoMainFunction
       in
+    (* TODO: Try to inline computation of the inital context to exec_func,
+     *       to avoid duplication with similar code in AssignCall. *)
     let initial_context = {
       program = program;
       call_stack = [{
@@ -395,8 +475,9 @@ let rec
         wrap (BatSet.singleton NoneType)
       )]);
       returned_types = BatSet.empty;
-      suspended_via_call_to = BatSet.empty;
-      executing = true
+      targets_of_recursion_suspended_calls = BatSet.empty;
+      executing = true;
+      cached_calls = BatMap.add (main_func, wrap (BatSet.singleton NoneType)) Executing BatMap.empty
     } in
     exec_func initial_context main_func
 
