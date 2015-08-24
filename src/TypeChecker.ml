@@ -70,6 +70,7 @@ type exec_context = {
   (** Set of local variables, and the type of value each one currently holds.
     * When entering a new function starts with the function parameters only. *)
   names : (string, typ) BatMap.t;
+  
   (** Within a function, the set of all simple types returned by various
     * return statements in function. When entering a new function starts empty.
     * 
@@ -83,6 +84,10 @@ type exec_context = {
   (** Whether the current function contains a call that performed
     * an optimizing-suspension. *)
   has_optimize_suspended_call : bool;
+  (** Whether the current function completes along any execution path,
+    * including abrupt termination (via a return). *)
+  completes : bool;
+  
   (** Within a function, whether the current block is still executing and isn't
     * suspended due to abrupt termination (via a return) or inability to make
     * progress on a function call. When entering a new function starts true.
@@ -231,8 +236,7 @@ let rec
                         
                     let suspended_context = {
                       context with
-                      (* NOTE: Redundant, but I want to be explicit *)
-                      targets_of_recursion_suspended_calls = context.targets_of_recursion_suspended_calls;
+                      completes = false;
                       executing = false
                     } in
                     suspended_context
@@ -273,8 +277,7 @@ let rec
                   
                   let suspended_context = {
                     context with
-                    (* NOTE: Redundant, but I want to be explicit *)
-                    targets_of_recursion_suspended_calls = context.targets_of_recursion_suspended_calls;
+                    completes = false;
                     executing = false
                   } in
                   suspended_context
@@ -321,6 +324,9 @@ let rec
             has_optimize_suspended_call = 
               end_then_context.has_optimize_suspended_call || 
               end_else_context.has_optimize_suspended_call;
+            completes =
+              end_then_context.completes ||
+              end_else_context.completes;
             executing = 
               end_then_context.executing || 
               end_else_context.executing;
@@ -402,60 +408,63 @@ let rec
       exit_func_context
       in
     
-    let was_not_suspended = 
-      (BatSet.is_empty step2.targets_of_recursion_suspended_calls) &&
-      (not step2.has_optimize_suspended_call) in
-    (if was_not_suspended then
-      (* Body was not suspended anywhere,
-       * so we can return an exact return type to our caller *)
-      
-      finish step2 func true (CompletedWithResult (wrap step2.returned_types))
-    
+    if not step2.completes then
+      finish step2 func false NeverCompletes
     else
-      (* Body was suspended due to either
-       * (1) a recursive call to self, an ancestor function,
-       *     or some combination; or
-       * (2) an optimizing suspension. *)
+      let was_not_suspended = 
+        (BatSet.is_empty step2.targets_of_recursion_suspended_calls) &&
+        (not step2.has_optimize_suspended_call) in
+      (if was_not_suspended then
+        (* Body was not suspended anywhere,
+         * so we can return an exact return type to our caller *)
+        
+        finish step2 func true (CompletedWithResult (wrap step2.returned_types))
       
-      (if BatSet.mem func step2.targets_of_recursion_suspended_calls then
-        (* If body was suspended somewhere due to self,
-         * try to compute a better approx return type for self and
-         * reexecute the body *)
-        
-        if BatSet.is_empty step2.returned_types then
-          (* Unable to compute an approx return type for self at the moment... *)
-          (if (BatSet.to_list step2.targets_of_recursion_suspended_calls) = [func] then
-            (* ...and will /never/ be able compute an approx return type
-             * since no ancestor caller is being depended on.
-             * 
-             * The body is making a hard dependency on the return type
-             * of self, but no further progress can be made in resolving
-             * a return type for self. *)
-            
-            (* Force resolve approx return type of self to Unreachable
-             * and reexecute body *)
-            exec_func_body step0 func NeverReturns NeverCompletes
-            
-          else
-            (* ...and may be able to compute a better approx return type
-             * later because an ancestor caller is being depended on. *)
-            
-            (* Suspend execution of self within caller *)
-            finish step2 func false Suspended
-          )
-        else
-          (* Improve approx return type of self and reexecute body *)
-          exec_func_body step0 func (ReturnsAtLeast (wrap step2.returned_types)) Executing
-        
       else
-        (* If body was suspended due to either
-         *    (1) a recursive call to ancestors only or
-         *    (2) an optimizing suspension,
-         * suspend execution of self within caller *)
-        finish step2 func false Suspended
+        (* Body was suspended due to either
+         * (1) a recursive call to self, an ancestor function,
+         *     or some combination; or
+         * (2) an optimizing suspension. *)
+        
+        (if BatSet.mem func step2.targets_of_recursion_suspended_calls then
+          (* If body was suspended somewhere due to self,
+           * try to compute a better approx return type for self and
+           * reexecute the body *)
+          
+          if BatSet.is_empty step2.returned_types then
+            (* Unable to compute an approx return type for self at the moment... *)
+            (if (BatSet.to_list step2.targets_of_recursion_suspended_calls) = [func] then
+              (* ...and will /never/ be able compute an approx return type
+               * since no ancestor caller is being depended on.
+               * 
+               * The body is making a hard dependency on the return type
+               * of self, but no further progress can be made in resolving
+               * a return type for self. *)
+              
+              (* Force resolve approx return type of self to Unreachable
+               * and reexecute body *)
+              exec_func_body step0 func NeverReturns NeverCompletes
+              
+            else
+              (* ...and may be able to compute a better approx return type
+               * later because an ancestor caller is being depended on. *)
+              
+              (* Suspend execution of self within caller *)
+              finish step2 func false Suspended
+            )
+          else
+            (* Improve approx return type of self and reexecute body *)
+            exec_func_body step0 func (ReturnsAtLeast (wrap step2.returned_types)) Executing
+          
+        else
+          (* If body was suspended due to either
+           *    (1) a recursive call to ancestors only or
+           *    (2) an optimizing suspension,
+           * suspend execution of self within caller *)
+          finish step2 func false Suspended
+        )
       )
-    )
-    and
+      and
   
   (exec_program : program -> exec_context) program =
     let main_func = 
@@ -473,6 +482,7 @@ let rec
       returned_types = BatSet.empty;
       targets_of_recursion_suspended_calls = BatSet.empty;
       has_optimize_suspended_call = false;
+      completes = true;
       executing = true;
       cached_calls = BatMap.empty
     } in
@@ -592,11 +602,30 @@ let test_mutual_recursion = {
 
 (* Program: Call self in infinite loop.
  * Ensure type checker doesn't get caught in an infinite loop itself. *)
-let test_infinite_loop = {
+let test_self_infinite_loop = {
   funcs = [
     {
       name = "infinite_loop"; param_var = "_"; body = [
         AssignCall { target_var = "_"; func_name = "infinite_loop"; arg_var = "_" };
+        Return { result_var = "_" };
+      ]
+    }
+  ]
+}
+
+(* Program: Call group of functions in infinite loop.
+ * Ensure type checker doesn't get caught in an infinite loop itself. *)
+let test_mutual_infinite_loop = {
+  funcs = [
+    {
+      name = "infinite_loop_1"; param_var = "_"; body = [
+        AssignCall { target_var = "_"; func_name = "infinite_loop_2"; arg_var = "_" };
+        Return { result_var = "_" };
+      ]
+    };
+    {
+      name = "infinite_loop_2"; param_var = "_"; body = [
+        AssignCall { target_var = "_"; func_name = "infinite_loop_1"; arg_var = "_" };
         Return { result_var = "_" };
       ]
     }
@@ -637,8 +666,10 @@ let if_then_call_else_call func_name = [
   };
 ]
 let deep_func_chain first_func_body last_func_body = [
-  { name = "f1"; param_var = "_"; body = if_then_call_else_call "f2" };
-  { name = "f2"; param_var = "_"; body = if_then_call_else_call "f3" };
+  { name = "f1"; param_var = "_"; body = first_func_body };
+  (* FIXME: Reinstate prior behavior *)
+  { name = "f2"; param_var = "_"; body = if_then_call_else_call "f32" (*"f3"*) };
+  (*
   { name = "f3"; param_var = "_"; body = if_then_call_else_call "f4" };
   { name = "f4"; param_var = "_"; body = if_then_call_else_call "f5" };
   { name = "f5"; param_var = "_"; body = if_then_call_else_call "f6" };
@@ -668,6 +699,7 @@ let deep_func_chain first_func_body last_func_body = [
   { name = "f29"; param_var = "_"; body = if_then_call_else_call "f30" };
   { name = "f30"; param_var = "_"; body = if_then_call_else_call "f31" };
   { name = "f31"; param_var = "_"; body = if_then_call_else_call "f32" };
+  *)
   (* TODO: See whether having f32 call f1 makes a difference in performance *)
   (* TODO: See whether having f1..32 call f1 makes a difference in performance *)
   (* TODO: See whether having f1..32 call f1..32 makes a difference in performance *)
@@ -710,5 +742,5 @@ let test_deep_call_chain_with_cycle = {
 (* -------------------------------------------------------------------------- *)
 (* Main *)
 
-let output = exec_program test_deep_call_chain
+let output = exec_program test_mutual_infinite_loop
 let () = printf "%s\n" (Sexp.to_string (sexp_of_exec_context output))
