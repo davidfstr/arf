@@ -163,109 +163,69 @@ let rec
           let func = find_func context.program.funcs func_name in
           let arg_value = BatMap.find arg_var context.names in
           
-          let (continue_with_call_result : exec_context -> exec_context) exit_func_context =
-            if exit_func_context.executing then
-              let returned_typ = wrap exit_func_context.returned_types in
+          let rec (find_frame_with_func : frame list -> func -> frame option) frame_list func =
+            match frame_list with
+              | (head :: tail) ->
+                if head.func = func then
+                  Some head
+                else
+                  find_frame_with_func tail func
               
-              let resumed_context = {
-                exit_func_context with
-                names = BatMap.add target_var returned_typ exit_func_context.names
-              } in
-              resumed_context
-            else
-              let suspended_context = {
-                exit_func_context with
-                (* NOTE: Redundant, but I want to be explicit *)
-                executing = false
-              } in
-              suspended_context
+              | [] ->
+                None
             in
           
-          if BatMap.mem (func, arg_value) context.cached_calls then
-            match BatMap.find (func, arg_value) context.cached_calls with
-              | Executing
-              | Suspended ->
-                (* Perform an optimizing-suspension *)
-                let () = printf "* call#cached#skip: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
-                
-                let suspended_context = {
-                  context with 
-                  has_optimize_suspended_call = true;
-                  executing = false
-                } in
-                suspended_context
+          (match find_frame_with_func context.call_stack func with
+            | None ->
+              (* Non-recursive call, possibly cached *)
               
-              | CompletedWithResult result_type ->
-                (* Use the cached return type *)
-                let () = printf "* call#cached#continue: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
-                    
-                let exit_func_context = {
-                  context with
-                  returned_types = unwrap result_type
-                } in
-                continue_with_call_result exit_func_context
-              
-              | NeverCompletes ->
-                (* Never returns? Suspend execution *)
-                let () = printf "* call#cached#neverreturn: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
-                    
-                let suspended_context = {
-                  context with
-                  (* NOTE: Redundant, but I want to be explicit *)
-                  targets_of_recursion_suspended_calls = context.targets_of_recursion_suspended_calls;
-                  executing = false
-                } in
-                suspended_context
-                
-          else
-            let rec (find_frame_with_func : frame list -> func -> frame option) frame_list func =
-              match frame_list with
-                | (head :: tail) ->
-                  if head.func = func then
-                    Some head
-                  else
-                    find_frame_with_func tail func
-                
-                | [] ->
-                  None
-              in
-            
-            (match find_frame_with_func context.call_stack func with
-              | None ->
-                (* Non-recursive call *)
-                let () = printf "* call#nonrec: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
-                
-                let exit_func_context = exec_func context func arg_value in
-                continue_with_call_result exit_func_context
-              
-              | Some prior_frame_with_func ->
-                (* Recursive call *)
-                (match prior_frame_with_func.approx_return_type with
-                  | ReturnsAtLeast approx_return_type ->
-                    (* Use the approx return type as the result and continue *)
-                    let () = printf "* call#rec#resume: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
-                    
-                    let resumed_context = {
-                      context with
-                      names = BatMap.add target_var approx_return_type context.names
-                    } in
-                    resumed_context
+              let (continue_with_call_result : exec_context -> exec_context) exit_func_context =
+                if exit_func_context.executing then
+                  let returned_typ = wrap exit_func_context.returned_types in
                   
-                  | ReturnsBeingCalculated ->
-                    (* No approx return type available yet? Suspend execution *)
-                    let () = printf "* call#rec#suspend: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
+                  let resumed_context = {
+                    exit_func_context with
+                    names = BatMap.add target_var returned_typ exit_func_context.names
+                  } in
+                  resumed_context
+                else
+                  let suspended_context = {
+                    exit_func_context with
+                    (* NOTE: Redundant, but I want to be explicit *)
+                    executing = false
+                  } in
+                  suspended_context
+                in
+              
+              if BatMap.mem (func, arg_value) context.cached_calls then
+                (* Cached call *)
+                match BatMap.find (func, arg_value) context.cached_calls with
+                  | Executing
+                  | Suspended ->
+                    (* Perform an optimizing-suspension *)
+                    let () = printf "* call#cached#skip: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
                     
                     let suspended_context = {
                       context with 
-                      targets_of_recursion_suspended_calls = BatSet.add func context.targets_of_recursion_suspended_calls;
+                      has_optimize_suspended_call = true;
                       executing = false
                     } in
                     suspended_context
                   
-                  | NeverReturns ->
+                  | CompletedWithResult result_type ->
+                    (* Use the cached return type *)
+                    let () = printf "* call#cached#continue: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
+                        
+                    let exit_func_context = {
+                      context with
+                      returned_types = unwrap result_type
+                    } in
+                    continue_with_call_result exit_func_context
+                  
+                  | NeverCompletes ->
                     (* Never returns? Suspend execution *)
-                    let () = printf "* call#rec#neverreturn: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
-                    
+                    let () = printf "* call#cached#neverreturn: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
+                        
                     let suspended_context = {
                       context with
                       (* NOTE: Redundant, but I want to be explicit *)
@@ -273,8 +233,50 @@ let rec
                       executing = false
                     } in
                     suspended_context
-                )
-            )
+              else
+                (* Non-recursive call *)
+                let () = printf "* call#nonrec: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
+                
+                let exit_func_context = exec_func context func arg_value in
+                continue_with_call_result exit_func_context
+            
+            | Some prior_frame_with_func ->
+              (* Recursive call *)
+              (match prior_frame_with_func.approx_return_type with
+                | ReturnsAtLeast approx_return_type ->
+                  (* Use the approx return type as the result and continue *)
+                  let () = printf "* call#rec#resume: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
+                  
+                  let resumed_context = {
+                    context with
+                    names = BatMap.add target_var approx_return_type context.names
+                  } in
+                  resumed_context
+                
+                | ReturnsBeingCalculated ->
+                  (* No approx return type available yet? Suspend execution *)
+                  let () = printf "* call#rec#suspend: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
+                  
+                  let suspended_context = {
+                    context with 
+                    targets_of_recursion_suspended_calls = BatSet.add func context.targets_of_recursion_suspended_calls;
+                    executing = false
+                  } in
+                  suspended_context
+                
+                | NeverReturns ->
+                  (* Never returns? Suspend execution *)
+                  let () = printf "* call#rec#neverreturn: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
+                  
+                  let suspended_context = {
+                    context with
+                    (* NOTE: Redundant, but I want to be explicit *)
+                    targets_of_recursion_suspended_calls = context.targets_of_recursion_suspended_calls;
+                    executing = false
+                  } in
+                  suspended_context
+              )
+          )
         
         | If { then_block = then_block; else_block = else_block } ->
           let () = printf "* if\n" in
@@ -482,7 +484,7 @@ let rec
 (* Tests *)
 
 (* Program: Returns main's argument, namely NoneType. *)
-let input1 = {
+let test_return_arg = {
   funcs = [
     {
       name = "main"; param_var = "_"; body = [
@@ -493,7 +495,7 @@ let input1 = {
 }
 
 (* Program: Returns the literal Int. *)
-let input2 = {
+let test_return_literal = {
   funcs = [
     {
       name = "main"; param_var = "_"; body = [
@@ -505,7 +507,7 @@ let input2 = {
 }
 
 (* Program: Calls f with main's argument. f returns its argument. *)
-let input3 = {
+let test_call_identity = {
   funcs = [
     {
       name = "main"; param_var = "_"; body = [
@@ -523,7 +525,7 @@ let input3 = {
 }
 
 (* Program: Computes factorial recursively. *)
-let input4 = {
+let test_self_recursion = {
   funcs = [
     {
       name = "main"; param_var = "_"; body = [
@@ -549,9 +551,50 @@ let input4 = {
   ]
 }
 
+(* Program: Computes is_even and is_odd with mutual recursion *)
+let test_mutual_recursion = {
+  funcs = [
+    {
+      name = "main"; param_var = "_"; body = [
+        AssignLiteral { target_var = "k"; literal = Int };
+        AssignCall { target_var = "result"; func_name = "is_even"; arg_var = "k" };
+        Return { result_var = "result" };
+      ]
+    };
+    {
+      name = "is_even"; param_var = "n"; body = [
+        If {
+          then_block = [
+            AssignLiteral { target_var = "k"; literal = Int };
+            Return { result_var = "k" };
+          ];
+          else_block = [
+            AssignCall { target_var = "result"; func_name = "is_odd"; arg_var = "n" };
+            Return { result_var = "result" };
+          ]
+        };
+      ]
+    };
+    {
+      name = "is_odd"; param_var = "n"; body = [
+        If {
+          then_block = [
+            AssignLiteral { target_var = "k"; literal = Int };
+            Return { result_var = "k" };
+          ];
+          else_block = [
+            AssignCall { target_var = "result"; func_name = "is_even"; arg_var = "n" };
+            Return { result_var = "result" };
+          ]
+        };
+      ]
+    };
+  ]
+}
+
 (* Program: Call self in infinite loop.
  * Ensure type checker doesn't get caught in an infinite loop itself. *)
-let input5 = {
+let test_infinite_loop = {
   funcs = [
     {
       name = "infinite_loop"; param_var = "_"; body = [
@@ -564,7 +607,7 @@ let input5 = {
 
 (* Program: Return either an Int or a Bool.
  * Ensure type checker recognizes that a function can return multiple types. *)
-let input6 = {
+let test_return_union_type = {
   funcs = [
     {
       name = "returns_int_or_bool"; param_var = "_"; body = [
@@ -632,7 +675,7 @@ let deep_func_chain first_func_body last_func_body = [
   (* TODO: See whether having f1..32 call f1..32 makes a difference in performance *)
   { name = "f32"; param_var = "_"; body = last_func_body };
 ]
-let input7 = {
+let test_deep_call_chain = {
   funcs = deep_func_chain
     (if_then_call_else_call "f2")
     []
@@ -643,7 +686,7 @@ let input7 = {
  *          and first function may return a constant.
  * Ensure type checker can evaluate in linear time rather than exponential. *)
 let return_nothing = [Return { result_var = "_" }]
-let input8 = {
+let test_deep_call_chain_with_cycle = {
   funcs = deep_func_chain
     [
       If {
@@ -669,5 +712,5 @@ let input8 = {
 (* -------------------------------------------------------------------------- *)
 (* Main *)
 
-let output = exec_program input8
+let output = exec_program test_mutual_recursion
 let () = printf "%s\n" (Sexp.to_string (sexp_of_exec_context output))
