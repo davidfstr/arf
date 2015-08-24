@@ -345,6 +345,8 @@ let rec
     and
   
   (exec_func : exec_context -> func -> typ -> exec_context) context func arg_value =
+    let () = printf "\n" in
+    
     let enter_func_context = {
       context with
       names = BatMap.of_enum (BatList.enum [(func.param_var, arg_value)]);
@@ -385,6 +387,7 @@ let rec
         step1
       in
     let () = printf "* end func '%s': %s\n" func.name (Sexp.to_string (sexp_of_exec_context step2)) in
+    let () = printf "\n" in
     
     let (finish : exec_context -> func -> bool -> call_status -> exec_context)
         context func executing call_status =
