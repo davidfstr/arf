@@ -162,6 +162,7 @@ let rec
           
           let (continue_with_call_result : exec_context -> exec_context) exit_func_context =
             if exit_func_context.executing then
+              (* TODO: Use `wrap`, which asserts that the set is non-empty *)
               let returned_typ = UnionOf exit_func_context.returned_types in
               
               let resumed_context = {
@@ -236,21 +237,7 @@ let rec
                 (* Non-recursive call *)
                 let () = printf "* call#nonrec: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
                 
-                let new_frame = {
-                  func = func;
-                  approx_return_type = ReturnsBeingCalculated
-                } in
-                let enter_func_context = {
-                  context with
-                  call_stack = new_frame :: context.call_stack;
-                  names = BatMap.of_enum (BatList.enum [(func.param_var, arg_value)]);
-                  returned_types = BatSet.empty;
-                  targets_of_recursion_suspended_calls = BatSet.empty;
-                  executing = true;
-                  cached_calls = BatMap.add (func, arg_value) Executing context.cached_calls
-                } in
-                
-                let exit_func_context = exec_func enter_func_context func in
+                let exit_func_context = exec_func context func arg_value in
                 continue_with_call_result exit_func_context
               
               | Some prior_frame_with_func ->
@@ -349,7 +336,24 @@ let rec
     BatList.fold_left exec context stmt_list
     and
   
-  (exec_func : exec_context -> func -> exec_context) context func =
+  (exec_func : exec_context -> func -> typ -> exec_context) context func arg_value =
+    let new_frame = {
+      func = func;
+      approx_return_type = ReturnsBeingCalculated
+    } in
+    let enter_func_context = {
+      context with
+      call_stack = new_frame :: context.call_stack;
+      names = BatMap.of_enum (BatList.enum [(func.param_var, arg_value)]);
+      returned_types = BatSet.empty;
+      targets_of_recursion_suspended_calls = BatSet.empty;
+      executing = true;
+      cached_calls = BatMap.add (func, arg_value) Executing context.cached_calls
+    } in
+    exec_func_body enter_func_context func
+    and
+  
+  (exec_func_body : exec_context -> func -> exec_context) context func =
     let arg_value = BatMap.find func.param_var context.names in
     
     (* Execute the function *)
@@ -415,7 +419,7 @@ let rec
               step0 with
               call_stack = new_frame :: BatList.tl step2.call_stack
             } in
-            exec_func step0_again func
+            exec_func_body step0_again func
             
           else
             (* ...and may be able to compute a better approx return type
@@ -441,7 +445,7 @@ let rec
             step0 with
             call_stack = new_frame :: BatList.tl step2.call_stack
           } in
-          exec_func step0_again func
+          exec_func_body step0_again func
         
       else
         (* If body was suspended due to ancestors only,
@@ -468,24 +472,16 @@ let rec
         | [] ->
           raise ProgramHasNoMainFunction
       in
-    (* TODO: Try to inline computation of the inital context to exec_func,
-     *       to avoid duplication with similar code in AssignCall. *)
     let initial_context = {
       program = program;
-      call_stack = [{
-        func = main_func;
-        approx_return_type = ReturnsBeingCalculated
-      }];
-      names = BatMap.of_enum (BatList.enum [(
-        main_func.param_var,
-        wrap (BatSet.singleton NoneType)
-      )]);
+      call_stack = [];
+      names = BatMap.empty;
       returned_types = BatSet.empty;
       targets_of_recursion_suspended_calls = BatSet.empty;
       executing = true;
-      cached_calls = BatMap.add (main_func, wrap (BatSet.singleton NoneType)) Executing BatMap.empty
+      cached_calls = BatMap.empty
     } in
-    exec_func initial_context main_func
+    exec_func initial_context main_func (wrap (BatSet.singleton NoneType))
 
 (* Program: Returns main's argument, namely NoneType. *)
 let input1 = {
