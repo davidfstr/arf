@@ -547,9 +547,24 @@ let input7 = {
     { name = "f29"; param_var = "_"; body = if_then_call_else_call "f30" };
     { name = "f30"; param_var = "_"; body = if_then_call_else_call "f31" };
     { name = "f31"; param_var = "_"; body = if_then_call_else_call "f32" };
+    (* TODO: See whether having f32 call f1 makes a difference in performance *)
+    (* TODO: See whether having f1..32 call f1 makes a difference in performance *)
+    (* TODO: See whether having f1..32 call f1..32 makes a difference in performance *)
     { name = "f32"; param_var = "_"; body = [] };
   ]
 }
+
+(* TODO: See whether having f1 call both f2#Int and f2#Bool, where f2 is the
+ *       identity function, deduces the correct type for f2 in both cases,
+ *       in the presence of optimizations. *)
+
+(* TODO: Ensure that an identity function when given type X returns only type X
+ *       along a particular code path, even if the same identity function may
+ *       be given type Y and return Y along a different path. In particular the
+ *       identity function when given X should NOT return X|Y. *)
+
+(* TODO: See whether having f1..32 call f1..32, with all possible argument types,
+ *       makes a difference in performance *)
 
 let output = exec_program input7
 let () = printf "%s\n" (Sexp.to_string (sexp_of_exec_context output))
