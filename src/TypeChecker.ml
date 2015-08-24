@@ -408,6 +408,12 @@ let rec
       exit_func_context
       in
     
+    (* TODO: The next two if-statements, which try to deduce the termination
+     *       possiblities for the function, are quite brittle.
+     * 
+     *       Would be great to represent termination information in
+     *       exec_context in a more explicit way so that this code
+     *       can be rewritten in a more obvious fashion. *)
     if not step2.completes then
       finish step2 func false NeverCompletes
     else
@@ -667,9 +673,7 @@ let if_then_call_else_call func_name = [
 ]
 let deep_func_chain first_func_body last_func_body = [
   { name = "f1"; param_var = "_"; body = first_func_body };
-  (* FIXME: Reinstate prior behavior *)
-  { name = "f2"; param_var = "_"; body = if_then_call_else_call "f32" (*"f3"*) };
-  (*
+  { name = "f2"; param_var = "_"; body = if_then_call_else_call "f3" };
   { name = "f3"; param_var = "_"; body = if_then_call_else_call "f4" };
   { name = "f4"; param_var = "_"; body = if_then_call_else_call "f5" };
   { name = "f5"; param_var = "_"; body = if_then_call_else_call "f6" };
@@ -699,7 +703,6 @@ let deep_func_chain first_func_body last_func_body = [
   { name = "f29"; param_var = "_"; body = if_then_call_else_call "f30" };
   { name = "f30"; param_var = "_"; body = if_then_call_else_call "f31" };
   { name = "f31"; param_var = "_"; body = if_then_call_else_call "f32" };
-  *)
   (* TODO: See whether having f32 call f1 makes a difference in performance *)
   (* TODO: See whether having f1..32 call f1 makes a difference in performance *)
   (* TODO: See whether having f1..32 call f1..32 makes a difference in performance *)
@@ -742,5 +745,5 @@ let test_deep_call_chain_with_cycle = {
 (* -------------------------------------------------------------------------- *)
 (* Main *)
 
-let output = exec_program test_mutual_infinite_loop
+let output = exec_program test_deep_call_chain_with_cycle
 let () = printf "%s\n" (Sexp.to_string (sexp_of_exec_context output))
