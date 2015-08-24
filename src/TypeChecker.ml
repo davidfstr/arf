@@ -276,6 +276,7 @@ let rec
   
   (exec_func : exec_context -> func -> exec_context) context func =
     (* Execute the function *)
+    let () = printf "* func '%s': %s\n" func.name (Sexp.to_string (sexp_of_exec_context context)) in
     let step0 = context in
     let step1 = exec_list step0 func.body in
     (* TODO: Rename to returned_context *)
@@ -291,6 +292,7 @@ let rec
       else
         step1
       in
+    let () = printf "* end func '%s': %s\n" func.name (Sexp.to_string (sexp_of_exec_context step2)) in
     
     (if BatSet.is_empty step2.suspended_via_call_to then
       (* Body was not suspended anywhere,
@@ -496,5 +498,5 @@ let input6 = {
   ]
 }
 
-let output = exec_program input6
+let output = exec_program input4
 let () = printf "%s\n" (Sexp.to_string (sexp_of_exec_context output))
