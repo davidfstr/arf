@@ -340,13 +340,8 @@ let rec
     and
   
   (exec_func : exec_context -> func -> typ -> exec_context) context func arg_value =
-    let new_frame = {
-      func = func;
-      approx_return_type = ReturnsBeingCalculated
-    } in
     let enter_func_context = {
       context with
-      call_stack = new_frame :: context.call_stack;
       names = BatMap.of_enum (BatList.enum [(func.param_var, arg_value)]);
       returned_types = BatSet.empty;
       targets_of_recursion_suspended_calls = BatSet.empty;
@@ -354,16 +349,23 @@ let rec
       executing = true;
       cached_calls = BatMap.add (func, arg_value) Executing context.cached_calls
     } in
-    exec_func_body enter_func_context func
+    exec_func_body enter_func_context func ReturnsBeingCalculated
     and
   
-  (exec_func_body : exec_context -> func -> exec_context) context func =
-    let arg_value = BatMap.find func.param_var context.names in
+  (exec_func_body : exec_context -> func -> func_return_typ -> exec_context)
+      step0 func approx_return_type =
+    let arg_value = BatMap.find func.param_var step0.names in
+    
+    (* TODO: Rename to step1.5 or similar *)
+    let new_frame = { func = func; approx_return_type = approx_return_type } in
+    let context = {
+      step0 with 
+      call_stack = new_frame :: step0.call_stack
+    } in
     
     (* Execute the function *)
     let () = printf "* func '%s': %s\n" func.name (Sexp.to_string (sexp_of_exec_context context)) in
-    let step0 = context in
-    let step1 = exec_list step0 func.body in
+    let step1 = exec_list context func.body in
     (* TODO: Rename to returned_context *)
     let step2 =
       if step1.executing then
@@ -419,16 +421,7 @@ let rec
             
             (* Force resolve approx return type of self to Unreachable
              * and reexecute body *)
-            let new_frame = {
-              func = func;
-              approx_return_type = NeverReturns
-            } in
-            let step0_again = {
-              step0 with
-              (* TODO: Need to /replace/ the top item in the call stack *)
-              call_stack = new_frame :: BatList.tl step2.call_stack
-            } in
-            exec_func_body step0_again func
+            exec_func_body step0 func NeverReturns
             
           else
             (* ...and may be able to compute a better approx return type
@@ -446,16 +439,7 @@ let rec
           )
         else
           (* Improve approx return type of self and reexecute body *)
-          let new_frame = {
-            func = func;
-            approx_return_type = ReturnsAtLeast (wrap step2.returned_types)
-          } in
-          let step0_again = {
-            step0 with
-            (* TODO: Need to /replace/ the top item in the call stack *)
-            call_stack = new_frame :: BatList.tl step2.call_stack
-          } in
-          exec_func_body step0_again func
+          exec_func_body step0 func (ReturnsAtLeast (wrap step2.returned_types))
         
       else
         (* If body was suspended due to either
