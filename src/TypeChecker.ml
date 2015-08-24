@@ -182,7 +182,7 @@ let rec
             | None ->
               (* Non-recursive call, possibly cached *)
               
-              let (continue_with_call_result : exec_context -> exec_context) exit_func_context =
+              let (finish : exec_context -> exec_context) exit_func_context =
                 if exit_func_context.executing then
                   let returned_typ = wrap exit_func_context.returned_types in
                   
@@ -223,7 +223,7 @@ let rec
                       context with
                       returned_types = unwrap result_type
                     } in
-                    continue_with_call_result exit_func_context
+                    finish exit_func_context
                   
                   | NeverCompletes ->
                     (* Never returns? Suspend execution *)
@@ -241,7 +241,7 @@ let rec
                 let () = printf "* call#nonrec: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
                 
                 let exit_func_context = exec_func context func arg_value in
-                continue_with_call_result exit_func_context
+                finish exit_func_context
             
             | Some prior_frame_with_func ->
               (* Recursive call *)
