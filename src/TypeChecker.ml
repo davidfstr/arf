@@ -393,6 +393,7 @@ let rec
         context func executing call_status =
       let exit_func_context = {
         context with
+        call_stack = BatList.tl context.call_stack;
         targets_of_recursion_suspended_calls = 
           BatSet.remove func context.targets_of_recursion_suspended_calls;
         executing = executing;
@@ -408,9 +409,7 @@ let rec
       (* Body was not suspended anywhere,
        * so we can return an exact return type to our caller *)
       
-      let resumed_context = finish step2 func 
-        true (CompletedWithResult (wrap step2.returned_types)) in
-      resumed_context
+      finish step2 func true (CompletedWithResult (wrap step2.returned_types))
     
     else
       (* Body was suspended due to either
@@ -442,8 +441,7 @@ let rec
              * later because an ancestor caller is being depended on. *)
             
             (* Suspend execution of self within caller *)
-            let suspended_context = finish step2 func false Suspended in
-            suspended_context
+            finish step2 func false Suspended
           )
         else
           (* Improve approx return type of self and reexecute body *)
@@ -454,8 +452,7 @@ let rec
          *    (1) a recursive call to ancestors only or
          *    (2) an optimizing suspension,
          * suspend execution of self within caller *)
-        let suspended_context = finish step2 func false Suspended in
-        suspended_context
+        finish step2 func false Suspended
       )
     )
     and
@@ -713,5 +710,5 @@ let test_deep_call_chain_with_cycle = {
 (* -------------------------------------------------------------------------- *)
 (* Main *)
 
-let output = exec_program test_mutual_recursion
+let output = exec_program test_deep_call_chain
 let () = printf "%s\n" (Sexp.to_string (sexp_of_exec_context output))
