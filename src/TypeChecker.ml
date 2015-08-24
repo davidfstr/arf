@@ -108,7 +108,10 @@ let func_names func_list =
 let (sexp_of_func_typ_call_status : ((func * typ) * call_status) -> Sexp.t) cached_call =
   let open Core.Std.Sexp in
   let ((f, t), cs) = cached_call in
-  List [Atom f.name; sexp_of_typ t; sexp_of_call_status cs]
+  List [
+    List [Atom f.name; sexp_of_typ t];
+    sexp_of_call_status cs
+  ]
 
 let sexp_of_exec_context context =
   let open Core.Std.Sexp in
@@ -348,21 +351,21 @@ let rec
       returned_types = BatSet.empty;
       targets_of_recursion_suspended_calls = BatSet.empty;
       has_optimize_suspended_call = false;
-      executing = true;
-      cached_calls = BatMap.add (func, arg_value) Executing context.cached_calls
+      executing = true
     } in
-    exec_func_body enter_func_context func ReturnsBeingCalculated
+    exec_func_body enter_func_context func ReturnsBeingCalculated Executing
     and
   
-  (exec_func_body : exec_context -> func -> func_return_typ -> exec_context)
-      step0 func approx_return_type =
+  (exec_func_body : exec_context -> func -> func_return_typ -> call_status -> exec_context)
+      step0 func approx_return_type call_status =
     let arg_value = BatMap.find func.param_var step0.names in
     
     (* TODO: Rename to step1.5 or similar *)
     let new_frame = { func = func; approx_return_type = approx_return_type } in
     let context = {
       step0 with 
-      call_stack = new_frame :: step0.call_stack
+      call_stack = new_frame :: step0.call_stack;
+      cached_calls = BatMap.add (func, arg_value) call_status step0.cached_calls
     } in
     
     (* Execute the function *)
@@ -423,7 +426,7 @@ let rec
             
             (* Force resolve approx return type of self to Unreachable
              * and reexecute body *)
-            exec_func_body step0 func NeverReturns
+            exec_func_body step0 func NeverReturns NeverCompletes
             
           else
             (* ...and may be able to compute a better approx return type
@@ -441,7 +444,7 @@ let rec
           )
         else
           (* Improve approx return type of self and reexecute body *)
-          exec_func_body step0 func (ReturnsAtLeast (wrap step2.returned_types))
+          exec_func_body step0 func (ReturnsAtLeast (wrap step2.returned_types)) Executing
         
       else
         (* If body was suspended due to either
