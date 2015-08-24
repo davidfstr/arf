@@ -292,16 +292,22 @@ let rec
             )
         
         | If { then_block = then_block; else_block = else_block } ->
-          let () = printf "* if: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
-          let () = printf "* then\n" in
-          let then_result = exec_list context then_block in
-          let () = printf "* end then: %s\n" (Sexp.to_string (sexp_of_exec_context then_result)) in
-          let () = printf "* else\n" in
-          let else_result = exec_list
-            (* TODO: Almost certainly need to be taking more state from then_result... *)
-            { context with cached_calls = then_result.cached_calls }
-            else_block in
-          let () = printf "* end else: %s\n" (Sexp.to_string (sexp_of_exec_context else_result)) in
+          let () = printf "* if\n" in
+          let if_context = context in
+          
+          let then_context = if_context in
+          let () = printf "* then: %s\n" (Sexp.to_string (sexp_of_exec_context then_context)) in
+          let end_then_context = exec_list then_context then_block in
+          let () = printf "* end then: %s\n" (Sexp.to_string (sexp_of_exec_context end_then_context)) in
+          
+          let else_context = {
+            end_then_context with
+            names = if_context.names;
+            executing = if_context.executing (* i.e. true *)
+          } in
+          let () = printf "* else: %s\n" (Sexp.to_string (sexp_of_exec_context else_context)) in
+          let end_else_context = exec_list else_context else_block in
+          let () = printf "* end else: %s\n" (Sexp.to_string (sexp_of_exec_context end_else_context)) in
           
           let (join : typ -> typ -> typ) typ1 typ2 = 
             match (typ1, typ2) with
@@ -309,24 +315,24 @@ let rec
                 UnionOf (BatSet.union stypes1 stypes2)
             in
           
-          let joined_result = {
+          let end_if_context = {
             program = context.program;
             call_stack = context.call_stack;
             names = BatMap.intersect
               join
-              then_result.names
-              else_result.names;
+              end_then_context.names
+              end_else_context.names;
             returned_types = BatSet.union
-              then_result.returned_types
-              else_result.returned_types;
+              end_then_context.returned_types
+              end_else_context.returned_types;
             targets_of_recursion_suspended_calls = BatSet.union
-              then_result.targets_of_recursion_suspended_calls
-              else_result.targets_of_recursion_suspended_calls;
-            executing = then_result.executing || else_result.executing;
-            cached_calls = else_result.cached_calls
+              end_then_context.targets_of_recursion_suspended_calls
+              end_else_context.targets_of_recursion_suspended_calls;
+            executing = end_then_context.executing || end_else_context.executing;
+            cached_calls = end_else_context.cached_calls
           } in
-          let () = printf "* end if: %s\n" (Sexp.to_string (sexp_of_exec_context joined_result)) in
-          joined_result
+          let () = printf "* end if: %s\n" (Sexp.to_string (sexp_of_exec_context end_if_context)) in
+          end_if_context
         
         | Return { result_var = result_var } ->
           let () = printf "* return: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
@@ -647,5 +653,5 @@ let input7 = {
 (* TODO: See whether having f1..32 call f1..32, with all possible argument types,
  *       makes a difference in performance *)
 
-let output = exec_program input7
+let output = exec_program input6
 let () = printf "%s\n" (Sexp.to_string (sexp_of_exec_context output))
