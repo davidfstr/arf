@@ -80,6 +80,9 @@ type exec_context = {
     * had no return type information available yet. Is always a subset of the
     * functions in the current call stack. When entering a new function starts empty. *)
   targets_of_recursion_suspended_calls : func BatSet.t;
+  (** Whether the current function contains a call that performed
+    * an optimizing-suspension. *)
+  has_optimize_suspended_call : bool;
   (** Within a function, whether the current block is still executing and isn't
     * suspended due to abrupt termination (via a return) or inability to make
     * progress on a function call. When entering a new function starts true.
@@ -187,11 +190,7 @@ let rec
                 
                 let suspended_context = {
                   context with 
-                  (* NOTE: This is a optimizing-suspension rather than a
-                   *       recursion-suspension. Therefore we don't track
-                   *       the call target. *)
-                  (* NOTE: Redundant, but I want to be explicit *)
-                  targets_of_recursion_suspended_calls = context.targets_of_recursion_suspended_calls;
+                  has_optimize_suspended_call = true;
                   executing = false
                 } in
                 suspended_context
@@ -314,7 +313,12 @@ let rec
             targets_of_recursion_suspended_calls = BatSet.union
               end_then_context.targets_of_recursion_suspended_calls
               end_else_context.targets_of_recursion_suspended_calls;
-            executing = end_then_context.executing || end_else_context.executing;
+            has_optimize_suspended_call = 
+              end_then_context.has_optimize_suspended_call || 
+              end_else_context.has_optimize_suspended_call;
+            executing = 
+              end_then_context.executing || 
+              end_else_context.executing;
             cached_calls = end_else_context.cached_calls
           } in
           let () = printf "* end if: %s\n" (Sexp.to_string (sexp_of_exec_context end_if_context)) in
@@ -346,6 +350,7 @@ let rec
       names = BatMap.of_enum (BatList.enum [(func.param_var, arg_value)]);
       returned_types = BatSet.empty;
       targets_of_recursion_suspended_calls = BatSet.empty;
+      has_optimize_suspended_call = false;
       executing = true;
       cached_calls = BatMap.add (func, arg_value) Executing context.cached_calls
     } in
@@ -374,8 +379,10 @@ let rec
       in
     let () = printf "* end func '%s': %s\n" func.name (Sexp.to_string (sexp_of_exec_context step2)) in
     
-    (* TODO: Shouldn't this be checking step2.executing to be more reliable? *)
-    (if step2.executing then
+    let was_not_suspended = 
+      (BatSet.is_empty step2.targets_of_recursion_suspended_calls) &&
+      (not step2.has_optimize_suspended_call) in
+    (if was_not_suspended then
       (* Body was not suspended anywhere,
        * so we can return an exact return type to our caller *)
       
@@ -418,6 +425,7 @@ let rec
             } in
             let step0_again = {
               step0 with
+              (* TODO: Need to /replace/ the top item in the call stack *)
               call_stack = new_frame :: BatList.tl step2.call_stack
             } in
             exec_func_body step0_again func
@@ -444,20 +452,19 @@ let rec
           } in
           let step0_again = {
             step0 with
+            (* TODO: Need to /replace/ the top item in the call stack *)
             call_stack = new_frame :: BatList.tl step2.call_stack
           } in
           exec_func_body step0_again func
         
       else
         (* If body was suspended due to either
-         *    (1) ancestors only or
+         *    (1) a recursive call to ancestors only or
          *    (2) an optimizing suspension,
          * suspend execution of self within caller *)
         let call_status = Suspended in
         let suspended_context = {
           step2 with
-          (* NOTE: This remove should be a no-op here. Leaving for consistency. *)
-          targets_of_recursion_suspended_calls = BatSet.remove func step2.targets_of_recursion_suspended_calls;
           executing = false;
           cached_calls = BatMap.add (func, arg_value) call_status step2.cached_calls
         } in
@@ -481,6 +488,7 @@ let rec
       names = BatMap.empty;
       returned_types = BatSet.empty;
       targets_of_recursion_suspended_calls = BatSet.empty;
+      has_optimize_suspended_call = false;
       executing = true;
       cached_calls = BatMap.empty
     } in
