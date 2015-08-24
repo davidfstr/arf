@@ -386,6 +386,18 @@ let rec
       in
     let () = printf "* end func '%s': %s\n" func.name (Sexp.to_string (sexp_of_exec_context step2)) in
     
+    let (finish : exec_context -> func -> bool -> call_status -> exec_context)
+        context func executing call_status =
+      let exit_func_context = {
+        context with
+        targets_of_recursion_suspended_calls = 
+          BatSet.remove func context.targets_of_recursion_suspended_calls;
+        executing = executing;
+        cached_calls = BatMap.add (func, arg_value) call_status context.cached_calls
+      } in
+      exit_func_context
+      in
+    
     let was_not_suspended = 
       (BatSet.is_empty step2.targets_of_recursion_suspended_calls) &&
       (not step2.has_optimize_suspended_call) in
@@ -393,14 +405,8 @@ let rec
       (* Body was not suspended anywhere,
        * so we can return an exact return type to our caller *)
       
-      let call_status = CompletedWithResult (wrap step2.returned_types) in
-      let resumed_context = {
-        step2 with
-        (* NOTE: Redundant, but I want to be explicit *)
-        returned_types = step2.returned_types;
-        executing = true;
-        cached_calls = BatMap.add (func, arg_value) call_status step2.cached_calls
-      } in
+      let resumed_context = finish step2 func 
+        true (CompletedWithResult (wrap step2.returned_types)) in
       resumed_context
     
     else
@@ -433,13 +439,7 @@ let rec
              * later because an ancestor caller is being depended on. *)
             
             (* Suspend execution of self within caller *)
-            let call_status = Suspended in
-            let suspended_context = {
-              step2 with
-              targets_of_recursion_suspended_calls = BatSet.remove func step2.targets_of_recursion_suspended_calls;
-              executing = false;
-              cached_calls = BatMap.add (func, arg_value) call_status step2.cached_calls
-            } in
+            let suspended_context = finish step2 func false Suspended in
             suspended_context
           )
         else
@@ -451,12 +451,7 @@ let rec
          *    (1) a recursive call to ancestors only or
          *    (2) an optimizing suspension,
          * suspend execution of self within caller *)
-        let call_status = Suspended in
-        let suspended_context = {
-          step2 with
-          executing = false;
-          cached_calls = BatMap.add (func, arg_value) call_status step2.cached_calls
-        } in
+        let suspended_context = finish step2 func false Suspended in
         suspended_context
       )
     )
