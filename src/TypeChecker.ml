@@ -31,6 +31,9 @@ let (sexp_of_typ : typ -> Sexp.t) typ =
         sexp_of_list sexp_of_simple_typ (BatSet.to_list stypes)
       ]
 
+let (typ_equal : typ -> typ -> bool) t1 t2 =
+  BatSet.equal (unwrap t1) (unwrap t2)
+
 type func_return_typ =
   (** Return type that is in the process of being calculated,
     * since the function has not yet completed one full execution pass. *)
@@ -59,10 +62,23 @@ type call_status =
   | NeverCompletes
   with sexp_of
 
+let (call_status_to_string : call_status -> string) call_status =
+  Sexp.to_string (sexp_of_call_status call_status)
+
+let (call_status_equal : call_status -> call_status -> bool) s1 s2 =
+  match (s1, s2) with
+    | (Executing, s2) -> s2 = Executing
+    | (Suspended, s2) -> s2 = Suspended
+    | (CompletedWithResult r1, CompletedWithResult r2) -> typ_equal r1 r2
+    | (CompletedWithResult r1, _) -> false
+    | (NeverCompletes, s2) -> s2 = NeverCompletes
+
 (** Interpreter state while executing statements in a program. *)
 type exec_context = {
   (** Program that is being executed. *)
   program : program;
+  (** Whether debug output should be generated *)
+  debug : bool;
   (** List of functions that were invoked to reach the current function,
     * including the current function itself. Current function is listed first.
     * Immediate caller is listed second. Further callers listed next. *)
@@ -152,6 +168,18 @@ let unique_item set =
 
 exception ProgramHasNoMainFunction
 
+let (log : string -> exec_context -> unit) message context =
+  if context.debug then
+    printf "* %s: %s\n" message (Sexp.to_string (sexp_of_exec_context context))
+  else
+    ()
+
+let (log_raw : string -> exec_context -> unit) message context =
+  if context.debug then
+    printf "%s" message
+  else
+    ()
+
 let rec
   (exec : exec_context -> stmt -> exec_context) context stmt =
     if not context.executing then
@@ -159,7 +187,7 @@ let rec
     else
       match stmt with
         | AssignLiteral { target_var = target_var; literal = literal } ->
-          let () = printf "* assign: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
+          let () = log "assign" context in
           let literal_typ = UnionOf (BatSet.singleton literal) in
           let after_assign_context = {
             context with
@@ -211,7 +239,7 @@ let rec
                   | Executing
                   | Suspended ->
                     (* Perform an optimizing-suspension *)
-                    let () = printf "* call#cached#skip: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
+                    let () = log "call#cached#skip" context in
                     
                     let suspended_context = {
                       context with 
@@ -222,7 +250,7 @@ let rec
                   
                   | CompletedWithResult result_type ->
                     (* Use the cached return type *)
-                    let () = printf "* call#cached#continue: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
+                    let () = log "call#cached#continue" context in
                         
                     let exit_func_context = {
                       context with
@@ -232,7 +260,7 @@ let rec
                   
                   | NeverCompletes ->
                     (* Never returns? Suspend execution *)
-                    let () = printf "* call#cached#neverreturn: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
+                    let () = log "call#cached#neverreturn" context in
                         
                     let suspended_context = {
                       context with
@@ -242,7 +270,7 @@ let rec
                     suspended_context
               else
                 (* Non-recursive call *)
-                let () = printf "* call#nonrec: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
+                let () = log "call#nonrec" context in
                 
                 let exit_func_context = exec_func context func arg_value in
                 finish exit_func_context
@@ -252,7 +280,7 @@ let rec
               (match prior_frame_with_func.approx_return_type with
                 | ReturnsAtLeast approx_return_type ->
                   (* Use the approx return type as the result and continue *)
-                  let () = printf "* call#rec#resume: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
+                  let () = log "call#rec#resume" context in
                   
                   let resumed_context = {
                     context with
@@ -262,7 +290,7 @@ let rec
                 
                 | ReturnsBeingCalculated ->
                   (* No approx return type available yet? Suspend execution *)
-                  let () = printf "* call#rec#suspend: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
+                  let () = log "call#rec#suspend" context in
                   
                   let suspended_context = {
                     context with 
@@ -273,7 +301,7 @@ let rec
                 
                 | NeverReturns ->
                   (* Never returns? Suspend execution *)
-                  let () = printf "* call#rec#neverreturn: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
+                  let () = log "call#rec#neverreturn" context in
                   
                   let suspended_context = {
                     context with
@@ -285,22 +313,22 @@ let rec
           )
         
         | If { then_block = then_block; else_block = else_block } ->
-          let () = printf "* if\n" in
+          let () = log_raw "* if\n" context in
           let if_context = context in
           
           let then_context = if_context in
-          let () = printf "* then: %s\n" (Sexp.to_string (sexp_of_exec_context then_context)) in
+          let () = log "then" then_context in
           let end_then_context = exec_list then_context then_block in
-          let () = printf "* end then: %s\n" (Sexp.to_string (sexp_of_exec_context end_then_context)) in
+          let () = log "end then" end_then_context in
           
           let else_context = {
             end_then_context with
             names = if_context.names;
             executing = if_context.executing (* i.e. true *)
           } in
-          let () = printf "* else: %s\n" (Sexp.to_string (sexp_of_exec_context else_context)) in
+          let () = log "else" else_context in
           let end_else_context = exec_list else_context else_block in
-          let () = printf "* end else: %s\n" (Sexp.to_string (sexp_of_exec_context end_else_context)) in
+          let () = log "end else" end_else_context in
           
           let (join : typ -> typ -> typ) typ1 typ2 = 
             match (typ1, typ2) with
@@ -310,6 +338,7 @@ let rec
           
           let end_if_context = {
             program = context.program;
+            debug = context.debug;
             call_stack = context.call_stack;
             names = BatMap.intersect
               join
@@ -332,11 +361,11 @@ let rec
               end_else_context.executing;
             cached_calls = end_else_context.cached_calls
           } in
-          let () = printf "* end if: %s\n" (Sexp.to_string (sexp_of_exec_context end_if_context)) in
+          let () = log "end if" end_if_context in
           end_if_context
         
         | Return { result_var = result_var } ->
-          let () = printf "* return: %s\n" (Sexp.to_string (sexp_of_exec_context context)) in
+          let () = log "return" context in
           let result_typ = BatMap.find result_var context.names in
           let returning_context = {
             context with
@@ -351,7 +380,7 @@ let rec
     and
   
   (exec_func : exec_context -> func -> typ -> exec_context) context func arg_value =
-    let () = printf "\n" in
+    let () = log_raw "\n" context in
     
     let enter_func_context = {
       context with
@@ -377,7 +406,7 @@ let rec
     } in
     
     (* Execute the function *)
-    let () = printf "* func '%s': %s\n" func.name (Sexp.to_string (sexp_of_exec_context context)) in
+    let () = log (sprintf "func '%s'" func.name) context in
     let step1 = exec_list context func.body in
     (* TODO: Rename to returned_context *)
     let step2 =
@@ -392,8 +421,8 @@ let rec
       else
         step1
       in
-    let () = printf "* end func '%s': %s\n" func.name (Sexp.to_string (sexp_of_exec_context step2)) in
-    let () = printf "\n" in
+    let () = log (sprintf "end func '%s'" func.name) step2 in
+    let () = log_raw "\n" step2 in
     
     let (finish : exec_context -> func -> bool -> call_status -> exec_context)
         context func executing call_status =
@@ -472,7 +501,7 @@ let rec
       )
       and
   
-  (exec_program : program -> exec_context) program =
+  (exec_program : ?debug:bool -> program -> exec_context) ?(debug=false) program =
     let main_func = 
       match program.funcs with
         | (head :: _) ->
@@ -483,6 +512,7 @@ let rec
       in
     let initial_context = {
       program = program;
+      debug = debug;
       call_stack = [];
       names = BatMap.empty;
       returned_types = BatSet.empty;
@@ -493,284 +523,3 @@ let rec
       cached_calls = BatMap.empty
     } in
     exec_func initial_context main_func (wrap (BatSet.singleton NoneType))
-
-(* -------------------------------------------------------------------------- *)
-(* Tests *)
-
-(* Program: Returns main's argument, namely NoneType. *)
-let test_return_arg = {
-  funcs = [
-    {
-      name = "main"; param_var = "_"; body = [
-        Return { result_var = "_" };
-      ]
-    }
-  ]
-}
-
-(* Program: Returns the literal Int. *)
-let test_return_literal = {
-  funcs = [
-    {
-      name = "main"; param_var = "_"; body = [
-        AssignLiteral { target_var = "k"; literal = Int };
-        Return { result_var = "k" };
-      ]
-    }
-  ]
-}
-
-(* Program: Calls f with main's argument. f returns its argument. *)
-let test_call_identity = {
-  funcs = [
-    {
-      name = "main"; param_var = "_"; body = [
-        AssignLiteral { target_var = "x"; literal = Int };
-        AssignCall { target_var = "result"; func_name = "f"; arg_var = "x" };
-        Return { result_var = "result" };
-      ]
-    };
-    {
-      name = "f"; param_var = "n"; body = [
-        Return { result_var = "n" };
-      ]
-    };
-  ]
-}
-
-(* Program: Computes factorial recursively. *)
-let test_self_recursion = {
-  funcs = [
-    {
-      name = "main"; param_var = "_"; body = [
-        AssignLiteral { target_var = "k"; literal = Int };
-        AssignCall { target_var = "result"; func_name = "fact"; arg_var = "k" };
-        Return { result_var = "result" };
-      ]
-    };
-    {
-      name = "fact"; param_var = "n"; body = [
-        If {
-          then_block = [
-            AssignLiteral { target_var = "k"; literal = Int };
-            Return { result_var = "k" };
-          ];
-          else_block = [
-            AssignCall { target_var = "result"; func_name = "fact"; arg_var = "n" };
-            Return { result_var = "result" };
-          ]
-        };
-      ]
-    };
-  ]
-}
-
-(* Program: Computes is_even and is_odd with mutual recursion *)
-let test_mutual_recursion = {
-  funcs = [
-    {
-      name = "main"; param_var = "_"; body = [
-        AssignLiteral { target_var = "k"; literal = Int };
-        AssignCall { target_var = "result"; func_name = "is_even"; arg_var = "k" };
-        Return { result_var = "result" };
-      ]
-    };
-    {
-      name = "is_even"; param_var = "n"; body = [
-        If {
-          then_block = [
-            AssignLiteral { target_var = "k"; literal = Int };
-            Return { result_var = "k" };
-          ];
-          else_block = [
-            AssignCall { target_var = "result"; func_name = "is_odd"; arg_var = "n" };
-            Return { result_var = "result" };
-          ]
-        };
-      ]
-    };
-    {
-      name = "is_odd"; param_var = "n"; body = [
-        If {
-          then_block = [
-            AssignLiteral { target_var = "k"; literal = Int };
-            Return { result_var = "k" };
-          ];
-          else_block = [
-            AssignCall { target_var = "result"; func_name = "is_even"; arg_var = "n" };
-            Return { result_var = "result" };
-          ]
-        };
-      ]
-    };
-  ]
-}
-
-(* Ensure that value from nested return propagates to calling function
- * in the presence of mutual recursion. *)
-let test_mutual_recursion_with_nested_return = {
-  funcs = [
-    {
-      name = "f"; param_var = "_"; body = [
-        AssignCall { target_var = "result"; func_name = "g"; arg_var = "_" };
-        Return { result_var = "result" };
-      ]
-    };
-    {
-      name = "g"; param_var = "_"; body = [
-        If {
-          then_block = [
-            AssignCall { target_var = "_"; func_name = "f"; arg_var = "_" };
-            Return { result_var = "_" };
-          ];
-          else_block = [
-            AssignLiteral { target_var = "k"; literal = Int };
-            Return { result_var = "k" };
-          ]
-        };
-      ]
-    };
-  ]
-}
-
-(* Program: Call self in infinite loop.
- * Ensure type checker doesn't get caught in an infinite loop itself. *)
-let test_self_infinite_loop = {
-  funcs = [
-    {
-      name = "infinite_loop"; param_var = "_"; body = [
-        AssignCall { target_var = "_"; func_name = "infinite_loop"; arg_var = "_" };
-        Return { result_var = "_" };
-      ]
-    }
-  ]
-}
-
-(* Program: Call group of functions in infinite loop.
- * Ensure type checker doesn't get caught in an infinite loop itself. *)
-let test_mutual_infinite_loop = {
-  funcs = [
-    {
-      name = "infinite_loop_1"; param_var = "_"; body = [
-        AssignCall { target_var = "_"; func_name = "infinite_loop_2"; arg_var = "_" };
-        Return { result_var = "_" };
-      ]
-    };
-    {
-      name = "infinite_loop_2"; param_var = "_"; body = [
-        AssignCall { target_var = "_"; func_name = "infinite_loop_1"; arg_var = "_" };
-        Return { result_var = "_" };
-      ]
-    }
-  ]
-}
-
-(* Program: Return either an Int or a Bool.
- * Ensure type checker recognizes that a function can return multiple types. *)
-let test_return_union_type = {
-  funcs = [
-    {
-      name = "returns_int_or_bool"; param_var = "_"; body = [
-        If {
-          then_block = [
-            AssignLiteral { target_var = "k"; literal = Int };
-            Return { result_var = "k" };
-          ];
-          else_block = [
-            AssignLiteral { target_var = "k"; literal = Bool };
-            Return { result_var = "k" };
-          ]
-        };
-      ]
-    }
-  ]
-}
-
-(* Program: Deep call chain of interlinked functions.
- * Ensure type checker can evaluate in linear time rather than exponential. *)
-let call func_name = [
-  AssignCall { target_var = "_"; func_name = func_name; arg_var = "_" };
-  Return { result_var = "_" };
-]
-let if_then_call_else_call func_name = [
-  If {
-    then_block = call func_name;
-    else_block = call func_name
-  };
-]
-let deep_func_chain first_func_body last_func_body = [
-  { name = "f1"; param_var = "_"; body = first_func_body };
-  { name = "f2"; param_var = "_"; body = if_then_call_else_call "f3" };
-  { name = "f3"; param_var = "_"; body = if_then_call_else_call "f4" };
-  { name = "f4"; param_var = "_"; body = if_then_call_else_call "f5" };
-  { name = "f5"; param_var = "_"; body = if_then_call_else_call "f6" };
-  { name = "f6"; param_var = "_"; body = if_then_call_else_call "f7" };
-  { name = "f7"; param_var = "_"; body = if_then_call_else_call "f8" };
-  { name = "f8"; param_var = "_"; body = if_then_call_else_call "f9" };
-  { name = "f9"; param_var = "_"; body = if_then_call_else_call "f10" };
-  { name = "f10"; param_var = "_"; body = if_then_call_else_call "f11" };
-  { name = "f11"; param_var = "_"; body = if_then_call_else_call "f12" };
-  { name = "f12"; param_var = "_"; body = if_then_call_else_call "f13" };
-  { name = "f13"; param_var = "_"; body = if_then_call_else_call "f14" };
-  { name = "f14"; param_var = "_"; body = if_then_call_else_call "f15" };
-  { name = "f15"; param_var = "_"; body = if_then_call_else_call "f16" };
-  { name = "f16"; param_var = "_"; body = if_then_call_else_call "f17" };
-  { name = "f17"; param_var = "_"; body = if_then_call_else_call "f18" };
-  { name = "f18"; param_var = "_"; body = if_then_call_else_call "f19" };
-  { name = "f19"; param_var = "_"; body = if_then_call_else_call "f20" };
-  { name = "f20"; param_var = "_"; body = if_then_call_else_call "f21" };
-  { name = "f21"; param_var = "_"; body = if_then_call_else_call "f22" };
-  { name = "f22"; param_var = "_"; body = if_then_call_else_call "f23" };
-  { name = "f23"; param_var = "_"; body = if_then_call_else_call "f24" };
-  { name = "f24"; param_var = "_"; body = if_then_call_else_call "f25" };
-  { name = "f25"; param_var = "_"; body = if_then_call_else_call "f26" };
-  { name = "f26"; param_var = "_"; body = if_then_call_else_call "f27" };
-  { name = "f27"; param_var = "_"; body = if_then_call_else_call "f28" };
-  { name = "f28"; param_var = "_"; body = if_then_call_else_call "f29" };
-  { name = "f29"; param_var = "_"; body = if_then_call_else_call "f30" };
-  { name = "f30"; param_var = "_"; body = if_then_call_else_call "f31" };
-  { name = "f31"; param_var = "_"; body = if_then_call_else_call "f32" };
-  (* TODO: See whether having f32 call f1 makes a difference in performance *)
-  (* TODO: See whether having f1..32 call f1 makes a difference in performance *)
-  (* TODO: See whether having f1..32 call f1..32 makes a difference in performance *)
-  { name = "f32"; param_var = "_"; body = last_func_body };
-]
-let test_deep_call_chain = {
-  funcs = deep_func_chain
-    (if_then_call_else_call "f2")
-    []
-}
-
-(* Program: Deep call chain of interlinked functions,
- *          where last function calls first function,
- *          and first function may return a constant.
- * Ensure type checker can evaluate in linear time rather than exponential. *)
-let return_nothing = [Return { result_var = "_" }]
-let test_deep_call_chain_with_cycle = {
-  funcs = deep_func_chain
-    [
-      If {
-        then_block = call "f2";
-        else_block = return_nothing
-      };
-    ]
-    (call "f1")
-}
-
-(* TODO: See whether having f1 call both f2#Int and f2#Bool, where f2 is the
- *       identity function, deduces the correct type for f2 in both cases,
- *       in the presence of optimizations. *)
-
-(* TODO: Ensure that an identity function when given type X returns only type X
- *       along a particular code path, even if the same identity function may
- *       be given type Y and return Y along a different path. In particular the
- *       identity function when given X should NOT return X|Y. *)
-
-(* TODO: See whether having f1..32 call f1..32, with all possible argument types,
- *       makes a difference in performance *)
-
-(* -------------------------------------------------------------------------- *)
-(* Main *)
-
-let output = exec_program test_mutual_recursion_with_nested_return
-let () = printf "%s\n" (Sexp.to_string (sexp_of_exec_context output))

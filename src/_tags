@@ -1,3 +1,4 @@
 <*.ml> or <*.native>: package(batteries)
 <*.ml> or <*.native>: package(core), thread
+<*.ml> or <*.native>: package(ounit)
 <*.ml> or <*.native>: package(sexplib.syntax), syntax(camlp4o)
