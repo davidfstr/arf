@@ -606,6 +606,33 @@ let test_mutual_recursion = {
   ]
 }
 
+(* Ensure that value from nested return propagates to calling function
+ * in the presence of mutual recursion. *)
+let test_mutual_recursion_with_nested_return = {
+  funcs = [
+    {
+      name = "f"; param_var = "_"; body = [
+        AssignCall { target_var = "result"; func_name = "g"; arg_var = "_" };
+        Return { result_var = "result" };
+      ]
+    };
+    {
+      name = "g"; param_var = "_"; body = [
+        If {
+          then_block = [
+            AssignCall { target_var = "_"; func_name = "f"; arg_var = "_" };
+            Return { result_var = "_" };
+          ];
+          else_block = [
+            AssignLiteral { target_var = "k"; literal = Int };
+            Return { result_var = "k" };
+          ]
+        };
+      ]
+    };
+  ]
+}
+
 (* Program: Call self in infinite loop.
  * Ensure type checker doesn't get caught in an infinite loop itself. *)
 let test_self_infinite_loop = {
@@ -745,5 +772,5 @@ let test_deep_call_chain_with_cycle = {
 (* -------------------------------------------------------------------------- *)
 (* Main *)
 
-let output = exec_program test_deep_call_chain_with_cycle
+let output = exec_program test_mutual_recursion_with_nested_return
 let () = printf "%s\n" (Sexp.to_string (sexp_of_exec_context output))
