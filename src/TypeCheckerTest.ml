@@ -381,11 +381,13 @@ let tests = tests @ [
               then_block = [
                 AssignLiteral { target_var = "x"; literal = Int };
                 AssignCall { target_var = "result"; func_name = "identity"; arg_var = "x" };
+                AssignCall { target_var = "result"; func_name = "expects_int"; arg_var = "result" };
                 Return { result_var = "result" };
               ];
               else_block = [
                 AssignLiteral { target_var = "x"; literal = Bool };
                 AssignCall { target_var = "result"; func_name = "identity"; arg_var = "x" };
+                AssignCall { target_var = "result"; func_name = "expects_bool"; arg_var = "result" };
                 Return { result_var = "result" };
               ]
             }
@@ -396,16 +398,23 @@ let tests = tests @ [
             Return { result_var = "n" };
           ]
         };
+        {
+          name = "expects_int"; param_var = "n"; body = [
+            Return { result_var = "n" };
+          ]
+        };
+        {
+          name = "expects_bool"; param_var = "n"; body = [
+            Return { result_var = "n" };
+          ]
+        };
       ]
     } in
     assert_return_type_equals_in_context output "identity" [Int] [Int];
     assert_return_type_equals_in_context output "identity" [Bool] [Bool];
+    assert_return_type_equals_just output "expects_int" Int;
+    assert_return_type_equals_just output "expects_bool" Bool;
   );
-
-  (* TODO: Ensure that an identity function when given type X returns only type X
-   *       along a particular code path, even if the same identity function may
-   *       be given type Y and return Y along a different path. In particular the
-   *       identity function when given X should NOT return X|Y. *)
 
   (* TODO: See whether having f1..32 call f1..32, with all possible argument types,
    *       makes a difference in performance *)
