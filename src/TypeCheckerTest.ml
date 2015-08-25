@@ -10,15 +10,24 @@ exception NoUniqueStatusForFunc of string
 let (inferred_return_status : exec_context -> string -> call_status)
     output func_name =
   let func = TypeChecker.find_func output.program.funcs func_name in
-  
-  let func_to_statuses = BatMap.filter (fun (f,p) s -> f = func) output.cached_calls in
+  let func_to_statuses = BatMap.filter
+    (fun (f,p) s -> f = func)
+    output.cached_calls in
   let statuses = BatList.of_enum (BatMap.values func_to_statuses) in
   match statuses with
-    | [status] ->
-      status
-    
-    | _ ->
-      raise (NoUniqueStatusForFunc func_name)
+    | [status] -> status
+    | _ -> raise (NoUniqueStatusForFunc func_name)
+
+let (inferred_return_status_in_context : exec_context -> string -> typ -> call_status)
+    output func_name arg_typ =
+  let func = TypeChecker.find_func output.program.funcs func_name in
+  let func_to_statuses = BatMap.filter
+    (fun (f,p) s -> (f = func) && (typ_equal p arg_typ))
+    output.cached_calls in
+  let statuses = BatList.of_enum (BatMap.values func_to_statuses) in
+  match statuses with
+    | [status] -> status
+    | _ -> raise (NoUniqueStatusForFunc func_name)
 
 let (assert_call_status_equals : exec_context -> string -> call_status -> unit)
     output func_name call_status =
@@ -36,6 +45,15 @@ let (assert_return_type_equals_just : exec_context -> string -> simple_typ -> un
 let (assert_return_type_equals_one_of : exec_context -> string -> simple_typ list -> unit)
     output func_name return_types =
   assert_return_type_equals output func_name (wrap (BatSet.of_list return_types))
+
+let (assert_return_type_equals_in_context : exec_context -> string -> simple_typ list -> simple_typ list -> unit)
+    output func_name arg_types return_types =
+  let arg_typ = wrap (BatSet.of_list arg_types) in
+  let return_type = wrap (BatSet.of_list return_types) in
+  let call_status = CompletedWithResult return_type in
+  assert_equal ~cmp:call_status_equal ~printer:call_status_to_string
+    call_status (inferred_return_status_in_context output func_name arg_typ)
+  
 
 (* -------------------------------------------------------------------------- *)
 (* Tests *)
@@ -77,19 +95,19 @@ let tests = [
         {
           name = "main"; param_var = "_"; body = [
             AssignLiteral { target_var = "x"; literal = Int };
-            AssignCall { target_var = "result"; func_name = "f"; arg_var = "x" };
+            AssignCall { target_var = "result"; func_name = "identity"; arg_var = "x" };
             Return { result_var = "result" };
           ]
         };
         {
-          name = "f"; param_var = "n"; body = [
+          name = "identity"; param_var = "n"; body = [
             Return { result_var = "n" };
           ]
         };
       ]
     } in
     assert_return_type_equals_just output "main" Int;
-    assert_return_type_equals_just output "f" Int;
+    assert_return_type_equals_just output "identity" Int;
   );
   
   (* Program: Computes factorial recursively. *)
@@ -351,9 +369,38 @@ let tests = tests @ [
     assert_return_type_equals_just output "f32" NoneType;
   );
   
-  (* TODO: See whether having f1 call both f2#Int and f2#Bool, where f2 is the
-   *       identity function, deduces the correct type for f2 in both cases,
-   *       in the presence of optimizations. *)
+  (* See whether having f1 call both f2#Int and f2#Bool, where f2 is the
+   * identity function, deduces the correct type for f2 in both cases,
+   * in the presence of optimizations. *)
+  "test_call_identity_in_multiple_contexts" >:: ( fun () ->
+    let output = TypeChecker.exec_program {
+      funcs = [
+        {
+          name = "main"; param_var = "_"; body = [
+            If {
+              then_block = [
+                AssignLiteral { target_var = "x"; literal = Int };
+                AssignCall { target_var = "result"; func_name = "identity"; arg_var = "x" };
+                Return { result_var = "result" };
+              ];
+              else_block = [
+                AssignLiteral { target_var = "x"; literal = Bool };
+                AssignCall { target_var = "result"; func_name = "identity"; arg_var = "x" };
+                Return { result_var = "result" };
+              ]
+            }
+          ]
+        };
+        {
+          name = "identity"; param_var = "n"; body = [
+            Return { result_var = "n" };
+          ]
+        };
+      ]
+    } in
+    assert_return_type_equals_in_context output "identity" [Int] [Int];
+    assert_return_type_equals_in_context output "identity" [Bool] [Bool];
+  );
 
   (* TODO: Ensure that an identity function when given type X returns only type X
    *       along a particular code path, even if the same identity function may
