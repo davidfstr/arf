@@ -9,6 +9,9 @@ let (wrap : simple_typ BatSet.t -> typ) stypes =
   let () = assert (not (BatSet.is_empty stypes)) in
   UnionOf stypes
 
+let (wrap_one : simple_typ -> typ) stype =
+  wrap (BatSet.singleton stype)
+
 let (unwrap : typ -> simple_typ BatSet.t) typ =
   match typ with
     | UnionOf stypes ->
@@ -188,7 +191,7 @@ let rec
       match stmt with
         | AssignLiteral { target_var = target_var; literal = literal } ->
           let () = log "assign" context in
-          let literal_typ = UnionOf (BatSet.singleton literal) in
+          let literal_typ = wrap_one literal in
           let after_assign_context = {
             context with
             names = BatMap.add target_var literal_typ context.names
@@ -198,6 +201,10 @@ let rec
         | AssignCall { target_var = target_var; func_name = func_name; arg_var = arg_var } ->
           let func = find_func context.program.funcs func_name in
           let arg_value = BatMap.find arg_var context.names in
+          
+          (* NOTE: Captures: func_name, context *)
+          let log_call message =
+            (log (sprintf "%s '%s'" message func_name) context) in
           
           let rec (find_frame_with_func : frame list -> func -> frame option) frame_list func =
             match frame_list with
@@ -239,7 +246,7 @@ let rec
                   | Executing
                   | Suspended ->
                     (* Perform an optimizing-suspension *)
-                    let () = log "call#cached#skip" context in
+                    let () = log_call "call#cached#skip" in
                     
                     let suspended_context = {
                       context with 
@@ -250,7 +257,7 @@ let rec
                   
                   | CompletedWithResult result_type ->
                     (* Use the cached return type *)
-                    let () = log "call#cached#continue" context in
+                    let () = log_call "call#cached#continue" in
                         
                     let exit_func_context = {
                       context with
@@ -260,7 +267,7 @@ let rec
                   
                   | NeverCompletes ->
                     (* Never returns? Suspend execution *)
-                    let () = log "call#cached#neverreturn" context in
+                    let () = log_call "call#cached#neverreturn" in
                         
                     let suspended_context = {
                       context with
@@ -270,7 +277,7 @@ let rec
                     suspended_context
               else
                 (* Non-recursive call *)
-                let () = log "call#nonrec" context in
+                let () = log_call "call#nonrec" in
                 
                 let exit_func_context = exec_func context func arg_value in
                 finish exit_func_context
@@ -280,7 +287,7 @@ let rec
               (match prior_frame_with_func.approx_return_type with
                 | ReturnsAtLeast approx_return_type ->
                   (* Use the approx return type as the result and continue *)
-                  let () = log "call#rec#resume" context in
+                  let () = log_call "call#rec#resume" in
                   
                   let resumed_context = {
                     context with
@@ -290,7 +297,7 @@ let rec
                 
                 | ReturnsBeingCalculated ->
                   (* No approx return type available yet? Suspend execution *)
-                  let () = log "call#rec#suspend" context in
+                  let () = log_call "call#rec#suspend" in
                   
                   let suspended_context = {
                     context with 
@@ -301,7 +308,7 @@ let rec
                 
                 | NeverReturns ->
                   (* Never returns? Suspend execution *)
-                  let () = log "call#rec#neverreturn" context in
+                  let () = log_call "call#rec#neverreturn" in
                   
                   let suspended_context = {
                     context with
@@ -522,4 +529,4 @@ let rec
       executing = true;
       cached_calls = BatMap.empty
     } in
-    exec_func initial_context main_func (wrap (BatSet.singleton NoneType))
+    exec_func initial_context main_func (wrap_one NoneType)

@@ -40,7 +40,7 @@ let (assert_return_type_equals : exec_context -> string -> typ -> unit)
 
 let (assert_return_type_equals_just : exec_context -> string -> simple_typ -> unit)
     output func_name return_type =
-  assert_return_type_equals output func_name (wrap (BatSet.singleton return_type))
+  assert_return_type_equals output func_name (wrap_one return_type)
 
 let (assert_return_type_equals_one_of : exec_context -> string -> simple_typ list -> unit)
     output func_name return_types =
@@ -415,9 +415,81 @@ let tests = tests @ [
     assert_return_type_equals_just output "expects_int" Int;
     assert_return_type_equals_just output "expects_bool" Bool;
   );
+]
 
-  (* TODO: See whether having f1..32 call f1..32, with all possible argument types,
-   *       makes a difference in performance *)
+let rec call_fi_to_fn i n =
+  if i < n then
+    [
+      If {
+        then_block = call ("f" ^ (string_of_int i));
+        else_block = call_fi_to_fn (i + 1) n
+      }
+    ]
+  else (* i = n *)
+    call ("f" ^ (string_of_int n))
+let rec range min max =
+  if min < max then
+    min :: (range (min + 1) max)
+  else (* min = max *)
+    [min]
+let deep_func_chain_all_pairs n with_return = 
+  let fi i = {
+    name = "f" ^ (string_of_int i);
+    param_var = "_";
+    body = 
+      if with_return && (i = n) then
+        (* The last function additionally returns nothing *)
+        [
+          If {
+            then_block = call_fi_to_fn 1 n;
+            else_block = return_nothing
+          }
+        ]
+      else
+        call_fi_to_fn 1 n
+        
+  } in
+  BatList.map fi (range 1 n)
+
+let tests = tests @ [
+  (* Program: Deep call chain of functions, where every function calls
+   *          every other function.
+   * Ensure type checker can evaluate in linear time rather than exponential. *)
+  "test_deep_call_chain_all_pairs_with_no_returns" >:: ( fun () ->
+    let n = 32 in
+    let output = TypeChecker.exec_program {
+      funcs = deep_func_chain_all_pairs n false
+    } in
+    let rec check i n call_status =
+      assert_call_status_equals output ("f" ^ (string_of_int i)) call_status;
+      if i < n then
+        check (i + 1) n call_status
+      else
+        ()
+      in
+    check 1 n NeverCompletes
+  );
+  
+  (* TODO: Make this test pass with large n. Breaks somewhere in 10-15 range. *)
+  (*
+  (* Program: Deep call chain of functions, where every function calls
+   *          every other function.
+   * Ensure type checker can evaluate in quadratic time rather than exponential. *)
+  "test_deep_call_chain_all_pairs_with_one_return" >:: ( fun () ->
+    let n = 32 in
+    let output = TypeChecker.exec_program ~debug:true {
+      funcs = deep_func_chain_all_pairs n true
+    } in
+    let rec check i n call_status =
+      assert_call_status_equals output ("f" ^ (string_of_int i)) call_status;
+      if i < n then
+        check (i + 1) n call_status
+      else
+        ()
+      in
+    check 1 n (CompletedWithResult (wrap_one NoneType))
+  );
+  *)
 ]
 
 let suite = "TypeCheckerTests" >::: tests
