@@ -470,14 +470,12 @@ let tests = tests @ [
     check 1 n NeverCompletes
   );
   
-  (* TODO: Make this test pass with large n. Breaks somewhere in 10-15 range. *)
-  (*
   (* Program: Deep call chain of functions, where every function calls
    *          every other function.
    * Ensure type checker can evaluate in quadratic time rather than exponential. *)
   "test_deep_call_chain_all_pairs_with_one_return" >:: ( fun () ->
     let n = 32 in
-    let output = TypeChecker.exec_program ~debug:true {
+    let output = TypeChecker.exec_program {
       funcs = deep_func_chain_all_pairs n true
     } in
     let rec check i n call_status =
@@ -489,7 +487,6 @@ let tests = tests @ [
       in
     check 1 n (CompletedWithResult (wrap_one NoneType))
   );
-  *)
 ]
 
 let suite = "TypeCheckerTests" >::: tests

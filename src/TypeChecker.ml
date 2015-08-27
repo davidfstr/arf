@@ -457,7 +457,7 @@ let rec
      *       Would be great to represent termination information in
      *       exec_context in a more explicit way so that this code
      *       can be rewritten in a more obvious fashion. *)
-    if not step2.completes then
+    (if not step2.completes then
       finish step2 func false NeverCompletes
     else
       let was_not_suspended = 
@@ -480,7 +480,7 @@ let rec
            * try to compute a better approx return type for self and
            * reexecute the body *)
           
-          if BatSet.is_empty step2.returned_types then
+          (if BatSet.is_empty step2.returned_types then
             (* Unable to compute an approx return type for self at the moment... *)
             (if (BatSet.to_list step2.targets_of_recursion_suspended_calls) = [func] then
               (* ...and will /never/ be able compute an approx return type
@@ -503,8 +503,16 @@ let rec
             )
           else
             (* Improve approx return type of self and reexecute body *)
-            exec_func_body step0 func (ReturnsAtLeast (wrap step2.returned_types)) Executing
-          
+            (if (BatSet.to_list step2.targets_of_recursion_suspended_calls) = [func] then
+              exec_func_body step0 func (ReturnsAtLeast (wrap step2.returned_types)) Executing
+            else
+              (* Optimization: Even if we were to improve our approx
+               * return type and reexecute the body, the body would still
+               * be suspended due to recursive calls to ancestors,
+               * so just shortcut to suspending ourself within caller. *)
+              finish step2 func false Suspended
+            )
+          )
         else
           (* If body was suspended due to either
            *    (1) a recursive call to ancestors only or
@@ -513,7 +521,8 @@ let rec
           finish step2 func false Suspended
         )
       )
-      and
+    )
+    and
   
   (exec_program : ?debug:bool -> program -> exec_context) ?(debug=false) program =
     let main_func = 
