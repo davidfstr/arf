@@ -82,6 +82,7 @@ type exec_context = {
   program : program;
   (** Whether debug output should be generated *)
   debug : bool;
+  
   (** List of functions that were invoked to reach the current function,
     * including the current function itself. Current function is listed first.
     * Immediate caller is listed second. Further callers listed next. *)
@@ -89,6 +90,14 @@ type exec_context = {
   (** Set of local variables, and the type of value each one currently holds.
     * When entering a new function starts with the function parameters only. *)
   names : (string, typ) BatMap.t;
+  (** Within a function, whether the current block is still executing and isn't
+    * suspended due to abrupt termination (via a return) or inability to make
+    * progress on a function call. When entering a new function starts true.
+    * 
+    * When returning from a function call, whether the caller should continue
+    * execution. If false then the caller should be suspended because the
+    * callee did not have enough information to generate a return type. *)
+  executing : bool;
   
   (** Within a function, the set of all simple types returned by various
     * return statements in function. When entering a new function starts empty.
@@ -107,14 +116,6 @@ type exec_context = {
     * including abrupt termination (via a return). *)
   completes : bool;
   
-  (** Within a function, whether the current block is still executing and isn't
-    * suspended due to abrupt termination (via a return) or inability to make
-    * progress on a function call. When entering a new function starts true.
-    * 
-    * When returning from a function call, whether the caller should continue
-    * execution. If false then the caller should be suspended because the
-    * callee did not have enough information to generate a return type. *)
-  executing : bool;
   (** Total set of calls that the interpreter is in the process of executing
     * or has finished executing. Tracked so that repeated calls to the same
     * function can be optimized away. *)
@@ -243,15 +244,19 @@ let rec
               if BatMap.mem (func, arg_value) context.cached_calls then
                 (* Cached call *)
                 match BatMap.find (func, arg_value) context.cached_calls with
-                  | Executing
+                  | Executing ->
+                    (* A (non-ancestor) sibling function shouldn't still
+                     * be executing... *)
+                    assert false
+                    
                   | Suspended ->
                     (* Perform an optimizing-suspension *)
                     let () = log_call "call#cached#skip" in
                     
                     let suspended_context = {
                       context with 
-                      has_optimize_suspended_call = true;
-                      executing = false
+                      executing = false;
+                      has_optimize_suspended_call = true
                     } in
                     suspended_context
                   
@@ -266,13 +271,13 @@ let rec
                     finish exit_func_context
                   
                   | NeverCompletes ->
-                    (* Never returns? Suspend execution *)
+                    (* Never completes? Suspend execution *)
                     let () = log_call "call#cached#neverreturn" in
                         
                     let suspended_context = {
                       context with
-                      completes = false;
-                      executing = false
+                      executing = false;
+                      completes = false
                     } in
                     suspended_context
               else
@@ -301,19 +306,20 @@ let rec
                   
                   let suspended_context = {
                     context with 
-                    targets_of_recursion_suspended_calls = BatSet.add func context.targets_of_recursion_suspended_calls;
-                    executing = false
+                    executing = false;
+                    targets_of_recursion_suspended_calls = 
+                      BatSet.add func context.targets_of_recursion_suspended_calls
                   } in
                   suspended_context
                 
                 | NeverReturns ->
-                  (* Never returns? Suspend execution *)
+                  (* Never completes? Suspend execution *)
                   let () = log_call "call#rec#neverreturn" in
                   
                   let suspended_context = {
                     context with
-                    completes = false;
-                    executing = false
+                    executing = false;
+                    completes = false
                   } in
                   suspended_context
               )
@@ -330,8 +336,8 @@ let rec
           
           let else_context = {
             end_then_context with
-            names = if_context.names;
-            executing = if_context.executing (* i.e. true *)
+            executing = if_context.executing; (* i.e. true *)
+            names = if_context.names
           } in
           let () = log "else" else_context in
           let end_else_context = exec_list else_context else_block in
@@ -351,6 +357,9 @@ let rec
               join
               end_then_context.names
               end_else_context.names;
+            executing = 
+              end_then_context.executing || 
+              end_else_context.executing;
             returned_types = BatSet.union
               end_then_context.returned_types
               end_else_context.returned_types;
@@ -363,9 +372,6 @@ let rec
             completes =
               end_then_context.completes ||
               end_else_context.completes;
-            executing = 
-              end_then_context.executing || 
-              end_else_context.executing;
             cached_calls = end_else_context.cached_calls
           } in
           let () = log "end if" end_if_context in
@@ -376,8 +382,9 @@ let rec
           let result_typ = BatMap.find result_var context.names in
           let returning_context = {
             context with
-            returned_types = BatSet.union (unwrap result_typ) context.returned_types;
-            executing = false
+            executing = false;
+            returned_types = 
+              BatSet.union (unwrap result_typ) context.returned_types
           } in
           returning_context
     and
@@ -392,10 +399,10 @@ let rec
     let enter_func_context = {
       context with
       names = BatMap.of_enum (BatList.enum [(func.param_var, arg_value)]);
+      executing = true;
       returned_types = BatSet.empty;
       targets_of_recursion_suspended_calls = BatSet.empty;
-      has_optimize_suspended_call = false;
-      executing = true
+      has_optimize_suspended_call = false
     } in
     exec_func_body enter_func_context func ReturnsBeingCalculated Executing
     and
@@ -421,8 +428,8 @@ let rec
         (* Implicit return of NoneType at the end of a function's body *)
         let returning_context = {
           step1 with
-          returned_types = BatSet.add NoneType step1.returned_types;
-          executing = false
+          executing = false;
+          returned_types = BatSet.add NoneType step1.returned_types
         } in
         returning_context
       else
@@ -436,9 +443,9 @@ let rec
       let exit_func_context = {
         context with
         call_stack = BatList.tl context.call_stack;
+        executing = executing;
         targets_of_recursion_suspended_calls = 
           BatSet.remove func context.targets_of_recursion_suspended_calls;
-        executing = executing;
         cached_calls = BatMap.add (func, arg_value) call_status context.cached_calls
       } in
       exit_func_context
@@ -522,11 +529,11 @@ let rec
       debug = debug;
       call_stack = [];
       names = BatMap.empty;
+      executing = true;
       returned_types = BatSet.empty;
       targets_of_recursion_suspended_calls = BatSet.empty;
       has_optimize_suspended_call = false;
       completes = true;
-      executing = true;
       cached_calls = BatMap.empty
     } in
     exec_func initial_context main_func (wrap_one NoneType)
