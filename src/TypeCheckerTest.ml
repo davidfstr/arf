@@ -79,7 +79,7 @@ let tests = [
       funcs = [
         {
           name = "main"; param_var = "_"; body = [
-            AssignLiteral { target_var = "k"; literal = Int };
+            AssignLiteral { target_var = "k"; literal_type = Int };
             Return { result_var = "k" };
           ]
         }
@@ -94,7 +94,7 @@ let tests = [
       funcs = [
         {
           name = "main"; param_var = "_"; body = [
-            AssignLiteral { target_var = "x"; literal = Int };
+            AssignLiteral { target_var = "x"; literal_type = Int };
             AssignCall { target_var = "result"; func_name = "identity"; arg_var = "x" };
             Return { result_var = "result" };
           ]
@@ -116,7 +116,7 @@ let tests = [
       funcs = [
         {
           name = "main"; param_var = "_"; body = [
-            AssignLiteral { target_var = "k"; literal = Int };
+            AssignLiteral { target_var = "k"; literal_type = Int };
             AssignCall { target_var = "result"; func_name = "fact"; arg_var = "k" };
             Return { result_var = "result" };
           ]
@@ -125,7 +125,7 @@ let tests = [
           name = "fact"; param_var = "n"; body = [
             If {
               then_block = [
-                AssignLiteral { target_var = "k"; literal = Int };
+                AssignLiteral { target_var = "k"; literal_type = Int };
                 Return { result_var = "k" };
               ];
               else_block = [
@@ -147,7 +147,7 @@ let tests = [
       funcs = [
         {
           name = "main"; param_var = "_"; body = [
-            AssignLiteral { target_var = "k"; literal = Int };
+            AssignLiteral { target_var = "k"; literal_type = Int };
             AssignCall { target_var = "result"; func_name = "is_even"; arg_var = "k" };
             Return { result_var = "result" };
           ]
@@ -156,7 +156,7 @@ let tests = [
           name = "is_even"; param_var = "n"; body = [
             If {
               then_block = [
-                AssignLiteral { target_var = "k"; literal = Bool };
+                AssignLiteral { target_var = "k"; literal_type = Bool };
                 Return { result_var = "k" };
               ];
               else_block = [
@@ -170,7 +170,7 @@ let tests = [
           name = "is_odd"; param_var = "n"; body = [
             If {
               then_block = [
-                AssignLiteral { target_var = "k"; literal = Bool };
+                AssignLiteral { target_var = "k"; literal_type = Bool };
                 Return { result_var = "k" };
               ];
               else_block = [
@@ -206,7 +206,7 @@ let tests = [
                 Return { result_var = "_" };
               ];
               else_block = [
-                AssignLiteral { target_var = "k"; literal = Int };
+                AssignLiteral { target_var = "k"; literal_type = Int };
                 Return { result_var = "k" };
               ]
             };
@@ -266,11 +266,11 @@ let tests = [
           name = "returns_int_or_bool"; param_var = "_"; body = [
             If {
               then_block = [
-                AssignLiteral { target_var = "k"; literal = Int };
+                AssignLiteral { target_var = "k"; literal_type = Int };
                 Return { result_var = "k" };
               ];
               else_block = [
-                AssignLiteral { target_var = "k"; literal = Bool };
+                AssignLiteral { target_var = "k"; literal_type = Bool };
                 Return { result_var = "k" };
               ]
             };
@@ -379,13 +379,13 @@ let tests = tests @ [
           name = "main"; param_var = "_"; body = [
             If {
               then_block = [
-                AssignLiteral { target_var = "x"; literal = Int };
+                AssignLiteral { target_var = "x"; literal_type = Int };
                 AssignCall { target_var = "result"; func_name = "identity"; arg_var = "x" };
                 AssignCall { target_var = "result"; func_name = "expects_int"; arg_var = "result" };
                 Return { result_var = "result" };
               ];
               else_block = [
-                AssignLiteral { target_var = "x"; literal = Bool };
+                AssignLiteral { target_var = "x"; literal_type = Bool };
                 AssignCall { target_var = "result"; func_name = "identity"; arg_var = "x" };
                 AssignCall { target_var = "result"; func_name = "expects_bool"; arg_var = "result" };
                 Return { result_var = "result" };

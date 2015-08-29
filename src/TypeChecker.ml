@@ -190,9 +190,9 @@ let rec
       context
     else
       match stmt with
-        | AssignLiteral { target_var = target_var; literal = literal } ->
+        | AssignLiteral { target_var = target_var; literal_type = literal_type } ->
           let () = log "assign" context in
-          let literal_typ = wrap_one literal in
+          let literal_typ = wrap_one literal_type in
           let after_assign_context = {
             context with
             names = BatMap.add target_var literal_typ context.names

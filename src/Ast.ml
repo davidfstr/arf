@@ -20,7 +20,7 @@ type
     and
   stmt_AssignLiteral = {
     target_var : string;
-    literal : simple_typ
+    literal_type : simple_typ
   } and
   stmt_AssignCall = {
     target_var : string;
