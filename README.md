@@ -275,12 +275,12 @@ Enough theory. Try the ARF type checker yourself on some sample programs!
 
 ### Building the Type Checker
 
-**(TODO: Implement everything these instructions depend on.)**
-
-* Install OCaml.
 * Install Make.
-* Run `make depend` to install remaining OCaml dependencies.
-* Run `make test` to run the unit tests to ensure everything is working as expected.
+* Install OPAM and OCaml 4.02.1.
+    * On OS X, run `brew install opam` to get OPAM.
+    * With OPAM, run <tt>opam switch 4.02.1</tt> and <tt>eval &#x60;opam config env&#x60;</tt>
+* Run `make deps` to install remaining OCaml dependencies.
+* Run `make test` to build ARF and run the automated tests.
 
 ### Running the Type Checker
 
