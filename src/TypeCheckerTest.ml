@@ -467,6 +467,7 @@ let assert_funcs_have_call_status output n call_status =
 let tests = tests @ [
   (* Program: Deep call chain of functions, where every function calls
    *          every other function.
+   * 
    * Ensure type checker can evaluate in linear time rather than exponential. *)
   "test_deep_call_chain_all_pairs_with_no_returns" >:: ( fun () ->
     let n = 32 in
@@ -478,6 +479,7 @@ let tests = tests @ [
   
   (* Program: Deep call chain of functions, where every function calls
    *          every other function.
+   * 
    * Ensure type checker can evaluate in quadratic time rather than exponential. *)
   "test_deep_call_chain_all_pairs_with_one_return" >:: ( fun () ->
     let n = 32 in
@@ -501,7 +503,7 @@ let rec call_fi_to_fn_in_series i n =
 let call_n_funcs_in_series_starting_at i n =
   (call_fi_to_fn_in_series i n) @ (call_fi_to_fn_in_series 1 (i-1))
 
-let deep_func_chain_all_pairs_in_series_and_parallel n =
+let deep_func_chain_all_pairs_in_series_and_parallel n all_rotations =
   let parallel_cases =
     (BatList.map (fun i -> call_n_funcs_in_series_starting_at i n) (range 1 n)) @
       [[]] (* empty stmt block *)
@@ -517,25 +519,41 @@ let deep_func_chain_all_pairs_in_series_and_parallel n =
   let fi i = {
     name = "f" ^ (string_of_int i);
     param_var = "_";
-    body = switch parallel_cases
+    body = 
+      if all_rotations then
+        switch parallel_cases
+      else (* one rotation *)
+        switch ([call_n_funcs_in_series_starting_at (i+1) n] @ [[]])
   } in
   BatList.map fi (range 1 n)
 
-(* TODO: Debug. Starts getting crazy runtimes with n=23 and above. *)
-(*
 let tests = tests @ [
   (* Program: Deep call chain of functions, where every function calls
-   *          every other function in series, in every possible rotation.
+   *          every other function in series, in one rotation.
+   * 
    * Ensure type checker can evaluate in quadratic time rather than exponential. *)
   "test_deep_func_chain_all_pairs_in_series_and_parallel" >:: ( fun () ->
-    let n = 23 in
+    let n = 32 in
     let output = TypeChecker.exec_program {
-      funcs = deep_func_chain_all_pairs_in_series_and_parallel n
+      funcs = deep_func_chain_all_pairs_in_series_and_parallel n false
+    } in
+    assert_funcs_have_call_status output n (CompletedWithResult (wrap_one NoneType))
+  );
+  
+  (* Program: Deep call chain of functions, where every function calls
+   *          every other function in series, in every possible rotation.
+   * 
+   * Ensure type checker can evaluate in O(n^4) time rather than exponential. *)
+  "test_deep_func_chain_all_pairs_in_series_and_parallel" >:: ( fun () ->
+    (* NOTE: Passes the 1s threshold after n=23. *)
+    (* NOTE: Takes 9s with n=32 *)
+    let n = 16 in
+    let output = TypeChecker.exec_program {
+      funcs = deep_func_chain_all_pairs_in_series_and_parallel n true
     } in
     assert_funcs_have_call_status output n (CompletedWithResult (wrap_one NoneType))
   );
 ]
-*)
 
 let suite = "TypeCheckerTests" >::: tests
 
