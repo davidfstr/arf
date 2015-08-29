@@ -417,22 +417,25 @@ let tests = tests @ [
   );
 ]
 
-let rec call_fi_to_fn i n =
-  if i < n then
-    [
-      If {
-        then_block = call ("f" ^ (string_of_int i));
-        else_block = call_fi_to_fn (i + 1) n
-      }
-    ]
-  else (* i = n *)
-    call ("f" ^ (string_of_int n))
 let rec range min max =
-  if min < max then
+  if min <= max then
     min :: (range (min + 1) max)
-  else (* min = max *)
-    [min]
+  else (* min > max *)
+    []
+
 let deep_func_chain_all_pairs n with_return = 
+  let rec call_fi_to_fn i n =
+    if i < n then
+      [
+        If {
+          then_block = call ("f" ^ (string_of_int i));
+          else_block = call_fi_to_fn (i + 1) n
+        }
+      ]
+    else (* i = n *)
+      call ("f" ^ (string_of_int n))
+    in
+  
   let fi i = {
     name = "f" ^ (string_of_int i);
     param_var = "_";
@@ -451,6 +454,16 @@ let deep_func_chain_all_pairs n with_return =
   } in
   BatList.map fi (range 1 n)
 
+let assert_funcs_have_call_status output n call_status =
+  let rec check i =
+    assert_call_status_equals output ("f" ^ (string_of_int i)) call_status;
+    if i < n then
+      check (i + 1)
+    else
+      ()
+    in
+  check 1
+
 let tests = tests @ [
   (* Program: Deep call chain of functions, where every function calls
    *          every other function.
@@ -460,14 +473,7 @@ let tests = tests @ [
     let output = TypeChecker.exec_program {
       funcs = deep_func_chain_all_pairs n false
     } in
-    let rec check i n call_status =
-      assert_call_status_equals output ("f" ^ (string_of_int i)) call_status;
-      if i < n then
-        check (i + 1) n call_status
-      else
-        ()
-      in
-    check 1 n NeverCompletes
+    assert_funcs_have_call_status output n NeverCompletes
   );
   
   (* Program: Deep call chain of functions, where every function calls
@@ -478,16 +484,58 @@ let tests = tests @ [
     let output = TypeChecker.exec_program {
       funcs = deep_func_chain_all_pairs n true
     } in
-    let rec check i n call_status =
-      assert_call_status_equals output ("f" ^ (string_of_int i)) call_status;
-      if i < n then
-        check (i + 1) n call_status
-      else
-        ()
-      in
-    check 1 n (CompletedWithResult (wrap_one NoneType))
+    assert_funcs_have_call_status output n (CompletedWithResult (wrap_one NoneType))
   );
 ]
+
+let rec call_fi_to_fn_in_series i n =
+  if i <= n then
+    AssignCall {
+      target_var = "_";
+      func_name = "f" ^ (string_of_int i);
+      arg_var = "_"
+    } :: (call_fi_to_fn_in_series (i+1) n)
+  else (* i > n *)
+    []
+
+let call_n_funcs_in_series_starting_at i n =
+  (call_fi_to_fn_in_series i n) @ (call_fi_to_fn_in_series 1 (i-1))
+
+let deep_func_chain_all_pairs_in_series_and_parallel n =
+  let parallel_cases =
+    (BatList.map (fun i -> call_n_funcs_in_series_starting_at i n) (range 1 n)) @
+      [[]] (* empty stmt block *)
+    in
+  
+  let rec switch cases =
+    match cases with
+      | [] -> assert false
+      | [head] -> head
+      | (head :: tail) -> [ If { then_block = head; else_block = switch tail } ]
+    in
+  
+  let fi i = {
+    name = "f" ^ (string_of_int i);
+    param_var = "_";
+    body = switch parallel_cases
+  } in
+  BatList.map fi (range 1 n)
+
+(* TODO: Debug. Starts getting crazy runtimes with n=23 and above. *)
+(*
+let tests = tests @ [
+  (* Program: Deep call chain of functions, where every function calls
+   *          every other function in series, in every possible rotation.
+   * Ensure type checker can evaluate in quadratic time rather than exponential. *)
+  "test_deep_func_chain_all_pairs_in_series_and_parallel" >:: ( fun () ->
+    let n = 23 in
+    let output = TypeChecker.exec_program {
+      funcs = deep_func_chain_all_pairs_in_series_and_parallel n
+    } in
+    assert_funcs_have_call_status output n (CompletedWithResult (wrap_one NoneType))
+  );
+]
+*)
 
 let suite = "TypeCheckerTests" >::: tests
 
