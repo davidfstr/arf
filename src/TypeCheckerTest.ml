@@ -423,18 +423,15 @@ let rec range min max =
   else (* min > max *)
     []
 
+let rec switch cases =
+  match cases with
+    | [] -> assert false
+    | [head] -> head
+    | (head :: tail) -> [ If { then_block = head; else_block = switch tail } ]
+
 let deep_func_chain_all_pairs n with_return = 
-  let rec call_fi_to_fn i n =
-    if i < n then
-      [
-        If {
-          then_block = call ("f" ^ (string_of_int i));
-          else_block = call_fi_to_fn (i + 1) n
-        }
-      ]
-    else (* i = n *)
-      call ("f" ^ (string_of_int n))
-    in
+  let rec call_f1_to_fn n =
+    switch (BatList.map (fun i -> call ("f" ^ (string_of_int i))) (range 1 n)) in
   
   let fi i = {
     name = "f" ^ (string_of_int i);
@@ -444,12 +441,12 @@ let deep_func_chain_all_pairs n with_return =
         (* The last function additionally returns nothing *)
         [
           If {
-            then_block = call_fi_to_fn 1 n;
+            then_block = call_f1_to_fn n;
             else_block = return_nothing
           }
         ]
       else
-        call_fi_to_fn 1 n
+        call_f1_to_fn n
         
   } in
   BatList.map fi (range 1 n)
@@ -490,30 +487,24 @@ let tests = tests @ [
   );
 ]
 
-let rec call_fi_to_fn_in_series i n =
-  if i <= n then
-    AssignCall {
-      target_var = "_";
-      func_name = "f" ^ (string_of_int i);
-      arg_var = "_"
-    } :: (call_fi_to_fn_in_series (i+1) n)
-  else (* i > n *)
-    []
-
-let call_n_funcs_in_series_starting_at i n =
-  (call_fi_to_fn_in_series i n) @ (call_fi_to_fn_in_series 1 (i-1))
-
 let deep_func_chain_all_pairs_in_series_and_parallel n all_rotations =
+  let rec call_fi_to_fn_in_series i n =
+    if i <= n then
+      AssignCall {
+        target_var = "_";
+        func_name = "f" ^ (string_of_int i);
+        arg_var = "_"
+      } :: (call_fi_to_fn_in_series (i+1) n)
+    else (* i > n *)
+      []
+    in
+  
+  let call_n_funcs_in_series_starting_at i n =
+    (call_fi_to_fn_in_series i n) @ (call_fi_to_fn_in_series 1 (i-1)) in
+  
   let parallel_cases =
     (BatList.map (fun i -> call_n_funcs_in_series_starting_at i n) (range 1 n)) @
       [[]] (* empty stmt block *)
-    in
-  
-  let rec switch cases =
-    match cases with
-      | [] -> assert false
-      | [head] -> head
-      | (head :: tail) -> [ If { then_block = head; else_block = switch tail } ]
     in
   
   let fi i = {
@@ -532,9 +523,10 @@ let tests = tests @ [
    *          every other function in series, in one rotation.
    * 
    * Ensure type checker can evaluate in quadratic time rather than exponential. *)
-  "test_deep_func_chain_all_pairs_in_series_and_parallel" >:: ( fun () ->
+  "test_deep_func_chain_all_pairs_in_series_and_parallel_with_one_rotation" >:: ( fun () ->
     let n = 32 in
     let output = TypeChecker.exec_program {
+      (* NOTE: Each function in this program has O(n) calls. *)
       funcs = deep_func_chain_all_pairs_in_series_and_parallel n false
     } in
     assert_funcs_have_call_status output n (CompletedWithResult (wrap_one NoneType))
@@ -544,11 +536,12 @@ let tests = tests @ [
    *          every other function in series, in every possible rotation.
    * 
    * Ensure type checker can evaluate in O(n^4) time rather than exponential. *)
-  "test_deep_func_chain_all_pairs_in_series_and_parallel" >:: ( fun () ->
+  "test_deep_func_chain_all_pairs_in_series_and_parallel_with_all_rotations" >:: ( fun () ->
     (* NOTE: Passes the 1s threshold after n=23. *)
     (* NOTE: Takes 9s with n=32 *)
     let n = 16 in
     let output = TypeChecker.exec_program {
+      (* NOTE: Each function in this program has O(n^2) calls. *)
       funcs = deep_func_chain_all_pairs_in_series_and_parallel n true
     } in
     assert_funcs_have_call_status output n (CompletedWithResult (wrap_one NoneType))
