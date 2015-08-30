@@ -327,9 +327,6 @@ let deep_func_chain first_func_body last_func_body = [
   { name = "f29"; param_var = "_"; body = if_then_call_else_call "f30" };
   { name = "f30"; param_var = "_"; body = if_then_call_else_call "f31" };
   { name = "f31"; param_var = "_"; body = if_then_call_else_call "f32" };
-  (* TODO: See whether having f32 call f1 makes a difference in performance *)
-  (* TODO: See whether having f1..32 call f1 makes a difference in performance *)
-  (* TODO: See whether having f1..32 call f1..32 makes a difference in performance *)
   { name = "f32"; param_var = "_"; body = last_func_body };
 ]
 

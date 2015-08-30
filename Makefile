@@ -9,7 +9,7 @@ run: Arf.native
 	OCAMLRUNPARAM=b ./Arf.native
 
 clean:
-	rm -f *.native
+	rm -f *.native _build
 
 deps:
 	# ocamlfind 1.5.5

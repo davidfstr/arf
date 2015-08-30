@@ -1,0 +1,7 @@
+def infinite_loop_1(_):
+    _ = infinite_loop_2(_)
+    return _
+
+def infinite_loop_2(_):
+    _ = infinite_loop_1(_)
+    return _

@@ -273,7 +273,7 @@ QED.
 
 Enough theory. Try the ARF type checker yourself on some sample programs!
 
-### Building the Type Checker
+### Build
 
 * Install Make.
 * Install OPAM and OCaml 4.02.1.
@@ -282,14 +282,12 @@ Enough theory. Try the ARF type checker yourself on some sample programs!
 * Run `make deps` to install remaining OCaml dependencies.
 * Run `make test` to build ARF and run the automated tests.
 
-### Running the Type Checker
-
-**(TODO: Implement everything these instructions depend on.)**
+### Run
 
 There are a series of sample files in the `samples/` directory of the ARF project. You can run samples using a command like:
 
 ```
-./arf.native samples/is_even.arf
+./Arf.native samples/is_even.arf
 ```
 
 That will type-check the specified ARF program and output the deduced return types of all functions:
@@ -305,6 +303,16 @@ If there are functions that provably never terminate, they will be given a ⊥ (
 ```
 infinite_loop_1(NoneType) -> ⊥
 infinite_loop_2(NoneType) -> ⊥
+```
+
+### Test
+
+There are a number of automated unit tests for ARF. These tests contain several interesting programs.
+
+Run the automated tests with:
+
+```
+make test
 ```
 
 ## License

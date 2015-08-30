@@ -112,7 +112,6 @@ let rec (tokenize : string list -> (token list, parse_error) Result.t) lines =
                 ok (TAssignLiteral { target_var; literal_type })
               
               | None ->
-                (* TODO: Emit parse error: unrecognized literal type *)
                 error ("unrecognized literal type: " ^ literal_type_iden)
             )
           
@@ -136,7 +135,6 @@ let rec (tokenize : string list -> (token list, parse_error) Result.t) lines =
             ok TPass
             
           else
-            (* TODO: Emit parse error: unrecognized statement *)
             error ("line syntax not understood: " ^ line)
           in
         
