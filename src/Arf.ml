@@ -312,11 +312,52 @@ let (parse_program_from_file : string -> (program, parse_error) Result.t) filena
   parse_program_from_lines lines
 
 (* -------------------------------------------------------------------------- *)
-(* print_return_types *)
+(* Output Return Types *)
 
 let (print_return_types : TypeChecker.exec_context -> unit) output =
-  (* TODO: Improve output format. Match the README *)
-  printf "%s\n" (Sexp.to_string (TypeChecker.sexp_of_exec_context output))
+  let open TypeChecker in
+  
+  let simple_typ_to_string stype =
+    match stype with
+      | NoneType -> "NoneType"
+      | Bool -> "bool"
+      | Int -> "int"
+    in
+  
+  let typ_to_string typ =
+    match typ with
+      | UnionOf stypes ->
+        let rec stypes_to_string stypes =
+          match stypes with
+            | [] -> assert false (* invalid *)
+            | [stype] -> simple_typ_to_string stype
+            | (head :: tail) -> sprintf "%s|%s" (simple_typ_to_string head) (stypes_to_string tail)
+          in
+        stypes_to_string (BatSet.to_list stypes)
+    in
+  
+  let call_status_to_string call_status =
+    match call_status with
+      | Executing
+      | Suspended ->
+        assert false (* invalid for a completed program *)
+      
+      | CompletedWithResult typ ->
+        typ_to_string typ
+      
+      | NeverCompletes ->
+        "⊥"
+    in
+  
+  let (cached_call_to_string : ((func * typ) * call_status) -> string) cached_call =
+    match cached_call with
+      | ((func, arg_type), return_type) ->
+        sprintf "%s(%s) -> %s" func.name (typ_to_string arg_type) (call_status_to_string return_type)
+    in
+  
+  let lines = BatList.map cached_call_to_string (BatMap.bindings output.cached_calls) in
+  let _ = BatList.map (fun s -> printf "* %s\n" s) lines in
+  ()
 
 (* -------------------------------------------------------------------------- *)
 (* main *)
