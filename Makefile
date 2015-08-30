@@ -1,8 +1,12 @@
-.PHONY: build test clean deps
+.PHONY: test run clean deps
 
 test: TypeCheckerTest.native
 	@# OCAMLRUNPARAM=b: Print stack traces
 	OCAMLRUNPARAM=b ./TypeCheckerTest.native
+
+run: Arf.native
+	@# OCAMLRUNPARAM=b: Print stack traces
+	OCAMLRUNPARAM=b ./Arf.native
 
 clean:
 	rm -f *.native
@@ -24,3 +28,10 @@ TypeCheckerTest.native: src/*.ml
 	ocamlbuild -use-ocamlfind \
 		-cflags -w,-30,-g \
 		src/TypeCheckerTest.native
+
+Arf.native: src/*.ml
+	@# -w -30: Disables warnings about different record types sharing a key name
+	@# -g: Enable capability to print stack traces
+	ocamlbuild -use-ocamlfind \
+		-cflags -w,-30,-g \
+		src/Arf.native
