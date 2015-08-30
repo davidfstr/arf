@@ -164,7 +164,7 @@ let rec (parse_stmt_list :
           Error (ParseError "expected statement list but found EOF")
         
         | IndentAt _ ->
-          Ok ([], [])
+          Ok ([], tokens)
       )
   
     | (token :: next_tokens) ->
@@ -261,14 +261,20 @@ let rec (parse_func_list : token list -> (func list, parse_error) Result.t) toke
     | [] ->
       Ok []
     
-    | { content = TDef { name; param_var }; indent = indent } :: next_tokens ->
-      let open Result.Monad_infix in
-      parse_stmt_list next_tokens (IndentRightOf indent) >>= fun (body, next_tokens) ->
-      parse_func_list next_tokens >>= fun next_funcs ->
-      Ok ({ name; param_var; body } :: next_funcs)
-    
-    | other_token :: next_tokens ->
-      Error (ParseError ("expected def statement but found: " ^ (token_to_string other_token)))
+    | token :: next_tokens ->
+      (match token with
+        | { content = TDef { name; param_var }; indent = def_indent } ->
+          if def_indent > 0 then
+            Error (ParseError ("expected 'def' statement to be in first column: " ^ (token_to_string token)))
+          else
+            let open Result.Monad_infix in
+            parse_stmt_list next_tokens (IndentRightOf def_indent) >>= fun (body, next_tokens) ->
+            parse_func_list next_tokens >>= fun next_funcs ->
+            Ok ({ name; param_var; body } :: next_funcs)
+        
+        | other_token ->
+          Error (ParseError ("expected 'def' statement but found: " ^ (token_to_string token)))
+      )
 
 let (parse_funcs_from_lines : string list -> (func list, parse_error) Result.t) lines =
   let open Result.Monad_infix in
