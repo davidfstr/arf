@@ -3,18 +3,18 @@ def main(_):
     result = is_even(k)     # AssignCall
     return result           # Return
 
-#def is_even(n):
-#    if:                     # If
-#        k = <bool>          # AssignLiteral
-#        return k            # Return
-#    else:
-#        result = is_odd(n)  # AssignCall
-#        return result       # Return
-#
-#def is_odd(n):
-#    if:                     # If
-#        k = <bool>          # AssignLiteral
-#        return k            # Return
-#    else:
-#        result = is_even(n) # AssignCall
-#        return result       # Return
+def is_even(n):
+    if:                     # If
+        k = <bool>          # AssignLiteral
+        return k            # Return
+    else:
+        result = is_odd(n)  # AssignCall
+        return result       # Return
+
+def is_odd(n):
+    if:                     # If
+        k = <bool>          # AssignLiteral
+        return k            # Return
+    else:
+        result = is_even(n) # AssignCall
+        return result       # Return

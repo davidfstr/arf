@@ -18,12 +18,17 @@ let parse_error_to_string error =
 (* Tokenizer *)
 
 type
-  token =
+  token = {
+    content : token_content;
+    indent : int
+  } and
+  
+  token_content =
     | TDef of token_TDef
-    | TIf
     | TAssignLiteral of token_TAssignLiteral
     | TAssignCall of token_TAssignCall
     | TReturn of token_TReturn
+    | TIf
     | TElse
     | TPass
     and
@@ -66,7 +71,7 @@ let rec (tokenize : string list -> (token list, parse_error) Result.t) lines =
       
       (* Strip whitespace on left, and measure indentation *)
       let (line_with_indent, line) = (line, String.lstrip line) in
-      (* let indent = (String.length line_with_indent) - (String.length line) in *)
+      let indent = (String.length line_with_indent) - (String.length line) in
       
       if line = "" then
         (* Ignore blank lines *)
@@ -82,10 +87,16 @@ let rec (tokenize : string list -> (token list, parse_error) Result.t) lines =
         let t_return_re = Str.regexp ("^return "^iden^"$") in
         
         let (token_result : (token, parse_error) Result.t) =
+          let ok token_content =
+            Ok { content = token_content; indent = indent } in
+          
+          let error message =
+            Error (ParseError message) in
+          
           if Str.string_match t_def_re line 0 then
             let name = Str.matched_group 1 line in
             let param_var = Str.matched_group 2 line in
-            Ok (TDef { name; param_var })
+            ok (TDef { name; param_var })
           
           else if Str.string_match t_assign_literal_re line 0 then
             let target_var = Str.matched_group 1 line in
@@ -98,26 +109,35 @@ let rec (tokenize : string list -> (token list, parse_error) Result.t) lines =
                 | _ -> None
             with
               | Some literal_type ->
-                Ok (TAssignLiteral { target_var; literal_type })
+                ok (TAssignLiteral { target_var; literal_type })
               
               | None ->
                 (* TODO: Emit parse error: unrecognized literal type *)
-                Error (ParseError ("unrecognized literal type: " ^ literal_type_iden))
+                error ("unrecognized literal type: " ^ literal_type_iden)
             )
           
           else if Str.string_match t_assign_call_re line 0 then
             let target_var = Str.matched_group 1 line in
             let func_name = Str.matched_group 2 line in
             let arg_var = Str.matched_group 3 line in
-            Ok (TAssignCall { target_var; func_name; arg_var })
+            ok (TAssignCall { target_var; func_name; arg_var })
           
           else if Str.string_match t_return_re line 0 then
             let result_var = Str.matched_group 1 line in
-            Ok (TReturn { result_var })
+            ok (TReturn { result_var })
+          
+          else if line = "if:" then
+            ok TIf
+            
+          else if line = "else:" then
+            ok TElse
+          
+          else if line = "pass" then
+            ok TPass
             
           else
             (* TODO: Emit parse error: unrecognized statement *)
-            Error (ParseError ("line syntax not understood: " ^ line))
+            error ("line syntax not understood: " ^ line)
           in
         
         let open Result.Monad_infix in
@@ -128,54 +148,122 @@ let rec (tokenize : string list -> (token list, parse_error) Result.t) lines =
 (* -------------------------------------------------------------------------- *)
 (* Parser *)
 
+type indent_constraint =
+  (* Just entering a new statement block *)
+  | IndentRightOf of int
+  (* Continuing within an existing statement block *)
+  | IndentAt of int
+
 let rec (parse_stmt_list :
-    ?allow_empty:bool -> token list -> ((stmt list * token list), parse_error) Result.t)
-    ?(allow_empty=false) tokens =
+    token list -> indent_constraint -> ((stmt list * token list), parse_error) Result.t)
+    tokens indent_constraint =
   match tokens with
     | [] ->
-      if allow_empty then
-        Ok ([], [])
-      else
-        Error (ParseError "expected statement list but found EOF")
+      (match indent_constraint with
+        | IndentRightOf _ ->
+          Error (ParseError "expected statement list but found EOF")
+        
+        | IndentAt _ ->
+          Ok ([], [])
+      )
   
     | (token :: next_tokens) ->
-      let stmt_option = match token with
-        | TAssignLiteral { target_var; literal_type } ->
-          Some (AssignLiteral { target_var; literal_type })
+      (* NOTE: Captures: token, next_tokens *)
+      let finish_with_end_of_list () =
+        Ok ([], token :: next_tokens) in
+      
+      let finish_with_error message =
+        Error (ParseError message) in
+      
+      let continue_with_ok_indent () =
+        (* NOTE: Captures: token *)
+        let parse_stmt_list_tail next_tokens =
+          parse_stmt_list next_tokens (IndentAt token.indent) in
+        
+        let continue_with_stmt stmt next_tokens =
+          let open Result.Monad_infix in
+          parse_stmt_list_tail next_tokens >>= fun (next_stmts, next_tokens) ->
+          Ok (stmt :: next_stmts, next_tokens)
+          in
+        
+        (* NOTE: Captures: next_tokens *)
+        let continue_with_simple_stmt stmt =
+          continue_with_stmt stmt next_tokens in
+        
+        (* NOTE: Captures: next_tokens *)
+        let continue_after_skipped_stmt () =
+          parse_stmt_list_tail next_tokens in
+        
+        match token.content with
+          | TDef _ ->
+            finish_with_error ("encountered top-level statement inside block: " ^ (token_to_string token))
           
-        | TAssignCall { target_var; func_name; arg_var } ->
-          Some (AssignCall { target_var; func_name; arg_var })
+          | TAssignLiteral { target_var; literal_type } ->
+            continue_with_simple_stmt (AssignLiteral { target_var; literal_type })
+            
+          | TAssignCall { target_var; func_name; arg_var } ->
+            continue_with_simple_stmt (AssignCall { target_var; func_name; arg_var })
+            
+          | TReturn { result_var } ->
+            continue_with_simple_stmt (Return { result_var })
           
-        | TReturn { result_var } ->
-          Some (Return { result_var })
+          | TIf ->
+            let parse_else next_tokens =
+              match next_tokens with
+                | [] ->
+                  finish_with_error "expected 'else' but found EOF"
+                
+                | ({ content = TElse; indent = else_indent } :: next_tokens) ->
+                  if else_indent = token.indent then
+                    Ok next_tokens
+                  else
+                    finish_with_error "expected 'else' to be indented to same level as paired 'if'"
+                
+                | (other_token :: next_tokens) ->
+                  finish_with_error ("expected 'else' but found: " ^ (token_to_string other_token))
+              in
+            
+            let open Result.Monad_infix in
+            parse_stmt_list next_tokens (IndentRightOf token.indent)
+              >>= fun (then_block, next_tokens) ->
+            parse_else next_tokens
+              >>= fun next_tokens ->
+            parse_stmt_list next_tokens (IndentRightOf token.indent)
+              >>= fun (else_block, next_tokens) ->
+            continue_with_stmt (If { then_block; else_block }) next_tokens
           
-        | TPass ->
-          (* No-op *)
-          None
+          | TElse ->
+            finish_with_error "orphaned 'else' clause"
           
-        | _ ->
-          (* Not a valid statement. Assume at end of statement list. *)
-          None
+          | TPass ->
+            continue_after_skipped_stmt ()
+          
         in
       
-      match stmt_option with
-        | Some stmt ->
-          let open Result.Monad_infix in
-          parse_stmt_list ~allow_empty:true next_tokens >>= fun (next_stmts, next_tokens) ->
-          Ok (stmt :: next_stmts, next_tokens)
+      (* Check indentation *)
+      match indent_constraint with
+        | IndentRightOf minlim_indent ->
+          if token.indent <= minlim_indent then
+            finish_with_error ("unexpected unindent: " ^ (token_to_string token))
+          else
+            continue_with_ok_indent ()
         
-        | None ->
-          Ok ([], token :: next_tokens)
-          
+        | IndentAt block_indent ->
+          if token.indent > block_indent then
+            finish_with_error ("unexpected indent: " ^ (token_to_string token))
+          else if token.indent < block_indent then
+            finish_with_end_of_list ()
+          else
+            continue_with_ok_indent ()
 
 let rec (parse_func_list : token list -> (func list, parse_error) Result.t) tokens =
   match tokens with
     | [] ->
       Ok []
     
-    | TDef { name; param_var } :: next_tokens ->
+    | { content = TDef { name; param_var }; indent = indent } :: next_tokens ->
       let open Result.Monad_infix in
-      parse_stmt_list next_tokens >>= fun (body, next_tokens) ->
+      parse_stmt_list next_tokens (IndentRightOf indent) >>= fun (body, next_tokens) ->
       parse_func_list next_tokens >>= fun next_funcs ->
       Ok ({ name; param_var; body } :: next_funcs)
     
@@ -221,6 +309,7 @@ let (parse_program_from_file : string -> (program, parse_error) Result.t) filena
 (* print_return_types *)
 
 let (print_return_types : TypeChecker.exec_context -> unit) output =
+  (* TODO: Improve output format. Match the README *)
   printf "%s\n" (Sexp.to_string (TypeChecker.sexp_of_exec_context output))
 
 (* -------------------------------------------------------------------------- *)
