@@ -282,7 +282,8 @@ Enough theory. Try the ARF type checker yourself on some sample programs!
     * On OS X, run `brew install opam` to get OPAM.
     * With OPAM, run <tt>opam switch 4.02.1</tt> and <tt>eval &#x60;opam config env&#x60;</tt>
 * Run `make deps` to install remaining OCaml dependencies.
-* Run `make test` to build ARF and run the automated tests.
+* Run `make build` to build ARF.
+* Run `make test` to run the automated tests.
 
 ### Run
 

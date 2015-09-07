@@ -1,4 +1,6 @@
-.PHONY: test run clean deps
+.PHONY: build test run clean deps
+
+build: Arf.native TypeCheckerTest.native
 
 test: TypeCheckerTest.native
 	@# OCAMLRUNPARAM=b: Print stack traces
