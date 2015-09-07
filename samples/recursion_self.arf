@@ -1,0 +1,12 @@
+def main(_):
+    k = <int>
+    result = fact(k)
+    return result
+
+def fact(n):
+    if:
+        k = <int>
+        return k
+    else:
+        result = fact(n)
+        return result

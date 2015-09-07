@@ -1,0 +1,11 @@
+def f(_):
+    result = g(_)
+    return result
+
+def g(_):
+    if:
+        _ = f(_)
+        return _
+    else:
+        k = <int>
+        return k
