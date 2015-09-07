@@ -267,7 +267,9 @@ When a program containing a mix of both recursive and non-recursive functions is
 * O(m·n + m) =
 * **O(m·n)**
 
+<!--
 QED.
+-->
 
 ## Try ARF!
 
@@ -319,10 +321,12 @@ make test
 
 Copyright (c) 2015 by David Foster
 
+<!--
 If you wish to cite my work in your own publications, please use the following format:
 
 * **Title:** Assign-Recurse-Flow (ARF)
 * **Author:** David Foster
 * **Link:** https://github.com/davidfstr/arf
+-->
 
 [^max-two-executions-of-body]: The "max two executions needed" property requires a lot of exposition to prove formally, so I will simply assert its truth for the moment.
