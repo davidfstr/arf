@@ -1,0 +1,3 @@
+def infinite_loop(_):
+    _ = infinite_loop(_)
+    return _
