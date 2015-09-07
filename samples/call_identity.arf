@@ -1,0 +1,7 @@
+def main(_):
+    x = <int>
+    result = identity(x)
+    return result
+
+def identity(n):
+    return n

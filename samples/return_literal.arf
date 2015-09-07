@@ -1,0 +1,3 @@
+def main(_):
+    k = <int>
+    return k
