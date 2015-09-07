@@ -1,0 +1,20 @@
+def main(_):
+    if:
+        x = <int>
+        result = identity(x)
+        result = expects_int(result)
+        return result
+    else:
+        x = <bool>
+        result = identity(x)
+        result = expects_bool(result)
+        return result
+
+def identity(n):
+    return n
+
+def expects_int(n):
+    return n
+
+def expects_bool(n):
+    return n

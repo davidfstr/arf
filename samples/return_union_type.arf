@@ -1,0 +1,7 @@
+def returns_int_or_bool(_):
+    if:
+        k = <int>
+        return k
+    else:
+        k = <bool>
+        return k
